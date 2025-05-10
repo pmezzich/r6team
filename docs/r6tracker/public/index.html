@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Team Dashboard - R6 Tracker</title>
+    <link rel="stylesheet" href="../styles/styles.css">
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+</head>
+<body>
+    <!-- Login Section -->
+    <div class="auth-container" id="loginSection">
+        <h2>Team Login</h2>
+        <form id="loginForm">
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="loginEmail" class="form-input" required>
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="loginPassword" class="form-input" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Login</button>
+        </form>
+    </div>
+
+    <!-- Dashboard Content -->
+    <div class="container" id="dashboardSection" style="display: none;">
+        <div class="nav-header">
+            <h1>🏆 Team Dashboard</h1>
+            <div class="auth-actions">
+                <span id="teamName" class="team-name"></span>
+                <button class="btn btn-danger" onclick="logout()">Logout</button>
+            </div>
+        </div>
+
+        <div class="dashboard-content">
+            <div class="nav-grid">
+                <a href="teamstats.html" class="nav-card">
+                    <div class="nav-icon">📊</div>
+                    <h3>Team Stats</h3>
+                </a>
+                <a href="team-managment.html" class="nav-card">
+                    <div class="nav-icon">👥</div>
+                    <h3>Team Roster</h3>
+                </a>
+                <a href="stats.html" class="nav-card">
+                    <div class="nav-icon">📊</div>
+                    <h3>Stats</h3>
+                </a>
+                <a href="compare.html" class="nav-card">
+                    <div class="nav-icon">⚖️</div>
+                    <h3>Compare Players</h3>
+                </a>
+                <a href="match_history.html" class="nav-card">
+                    <div class="nav-icon">📜</div>
+                    <h3>Match History</h3>
+                </a>
+                <a href="matchreplay.html" class="nav-card captain-only" id="matchAddBtn">
+                    <div class="nav-icon">➕</div>
+                    <h3>Add Match</h3>
+                </a>
+            </div>
+
+            <div class="quick-stats">
+                <div class="stat-card">
+                    <h4>Team Performance</h4>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-label">Total Kills</div>
+                            <div class="stat-value" id="totalKills">-</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">Total Rounds</div>
+                            <div class="stat-value" id="totalRounds">-</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">Maps Played</div>
+                            <div class="stat-value" id="totalMaps">-</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <h4>Team Overview</h4>
+                    <div id="teamOverview"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-spinner"></div>
+        <p>Authenticating...</p>
+    </div>
+
+    <script>
+        (function() {
+            const firebaseConfig = {
+                apiKey: "AIzaSyBRrm0ZrKfhrBWa7A0VghOz82ufJvHeJqI",
+                authDomain: "r6stattracker.firebaseapp.com",
+                databaseURL: "https://r6stattracker-default-rtdb.firebaseio.com",
+                projectId: "r6stattracker",
+                storageBucket: "r6stattracker.appspot.com",
+                messagingSenderId: "575541861129",
+                appId: "1:575541861129:web:28682f4fc01279e46651d8",
+                measurementId: "G-TN7LJDJP3R"
+            };
+
+            const app = firebase.initializeApp(firebaseConfig);
+            const auth = firebase.auth();
+            const db = firebase.database();
+
+            // Auth state handler
+            auth.onAuthStateChanged(async (user) => {
+                const loginSection = document.getElementById('loginSection');
+                const dashboardSection = document.getElementById('dashboardSection');
+                const loadingOverlay = document.getElementById('loadingOverlay');
+
+                try {
+                    loadingOverlay.style.display = 'flex';
+                    
+                    if (!user) {
+                        loginSection.style.display = 'block';
+                        dashboardSection.style.display = 'none';
+                        return;
+                    }
+
+                    // User is logged in, load dashboard
+                    const teamId = (await db.ref(`users/${user.uid}/teamId`).once('value')).val();
+                    if (!teamId) throw new Error("No team association");
+
+                    const teamSnap = await db.ref(`teams/${teamId}/info`).once('value');
+                    document.getElementById('teamName').textContent = teamSnap.val().teamName;
+
+                    const playerSnap = await db.ref(`teams/${teamId}/players/${user.uid}`).once('value');
+                    document.getElementById('matchAddBtn').style.display = 
+                        playerSnap.val().role === 'captain' ? 'flex' : 'none';
+
+                    loginSection.style.display = 'none';
+                    dashboardSection.style.display = 'block';
+                    loadQuickStats(teamId);
+
+                } catch (error) {
+                    console.error("Auth error:", error);
+                    auth.signOut();
+                    showError(error.message);
+                    loginSection.style.display = 'block';
+                    dashboardSection.style.display = 'none';
+                } finally {
+                    loadingOverlay.style.display = 'none';
+                }
+            });
+
+            // Login handler
+            document.getElementById('loginForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const email = document.getElementById('loginEmail').value;
+                const password = document.getElementById('loginPassword').value;
+                const loadingOverlay = document.getElementById('loadingOverlay');
+
+                try {
+                    loadingOverlay.style.display = 'flex';
+                    await firebase.auth().signInWithEmailAndPassword(email, password);
+                } catch (error) {
+                    let message = 'Login failed: ';
+                    switch (error.code) {
+                        case 'auth/invalid-email': message += 'Invalid email format'; break;
+                        case 'auth/user-not-found':
+                        case 'auth/wrong-password': message += 'Invalid credentials'; break;
+                        default: message += error.message;
+                    }
+                    showError(message);
+                } finally {
+                    loadingOverlay.style.display = 'none';
+                }
+            });
+
+            async function loadQuickStats(teamId) {
+                try {
+                    const matchesRef = firebase.database().ref(`teams/${teamId}/matches`);
+                    const snapshot = await matchesRef.once('value');
+                    const matches = snapshot.val() || {};
+
+                    let totalKills = 0;
+                    let totalRounds = 0;
+                    let totalMaps = 0;
+
+                    // Calculate totals from all matches
+                    Object.values(matches).forEach(match => {
+                        match.maps?.forEach(map => {
+                            totalMaps++;
+                            totalRounds += map.teamScore + map.opponentScore;
+                            
+                            Object.values(map.players || {}).forEach(player => {
+                                totalKills += player.kills || 0;
+                            });
+                        });
+                    });
+
+                    // Update displays
+                    document.getElementById('totalKills').textContent = totalKills;
+                    document.getElementById('totalRounds').textContent = totalRounds;
+                    document.getElementById('totalMaps').textContent = totalMaps;
+
+                    // Existing team overview
+                    const playersSnap = await firebase.database().ref(`teams/${teamId}/players`).once('value');
+                    document.getElementById('teamOverview').innerHTML = `
+                        <p>Total Players: ${Object.keys(playersSnap.val()).length}</p>
+                        <p>Total Matches: ${Object.keys(matches).length}</p>
+                    `;
+
+                } catch (error) {
+                    console.error("Quick stats error:", error);
+                }
+            }
+
+            window.logout = () => {
+                auth.signOut().then(() => {
+                    document.getElementById('loginSection').style.display = 'block';
+                    document.getElementById('dashboardSection').style.display = 'none';
+                }).catch((error) => {
+                    showError('Logout error: ' + error.message);
+                });
+            };
+
+            function showError(message) {
+                const toast = document.createElement('div');
+                toast.className = 'toast error';
+                toast.textContent = message;
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 5000);
+            }
+        })();
+    </script>
+
+    <style>
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            z-index: 1000;
+        }
+
+        .loading-spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #7C3AED;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 1rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .dashboard-content {
+            margin-top: 2rem;
+            padding: 2rem;
+            background: var(--dark-secondary);
+            border-radius: 12px;
+        }
+
+        .nav-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .nav-card {
+            padding: 1.5rem;
+            background: var(--dark);
+            border-radius: 8px;
+            text-align: center;
+            text-decoration: none;
+            transition: transform 0.2s;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .nav-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+
+        .nav-icon {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .quick-stats {
+            display: grid;
+            gap: 2rem;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        }
+
+        .stat-card {
+            padding: 2rem;
+            background: var(--dark-secondary);
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .stat-card h4 {
+            margin-bottom: 1.5rem;
+            color: var(--primary);
+        }
+
+        .stats-grid {
+            display: grid;
+            gap: 1rem;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 1rem;
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary);
+            margin-top: 0.5rem;
+        }
+
+        .stat-label {
+            color: var(--secondary);
+            font-size: 0.9rem;
+        }
+
+        .toast.error {
+            background: #dc3545;
+            color: white;
+            padding: 1rem 2rem;
+            border-radius: 8px;
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+        }
+    </style>
+</body>
+</html>

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create New Team - R6 Tracker</title>
+    <link rel="stylesheet" href="../styles/styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="auth-container">
+            <h1>Create New Team</h1>
+            <form id="teamCreationForm">
+                <div class="form-group">
+                    <label for="teamName">Team Name</label>
+                    <input type="text" id="teamName" class="form-input" required 
+                           placeholder="Enter team name" autocomplete="organization">
+                    <small class="form-text">This will create your team's unique URL identifier</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="email">Captain's Email</label>
+                    <input type="email" id="email" class="form-input" required
+                           placeholder="captain@team.com" autocomplete="email">
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" class="form-input" required
+                           placeholder="Create password" autocomplete="new-password"
+                           minlength="8">
+                    <small class="form-text">Minimum 8 characters</small>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">
+                        🚀 Create Team Account
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script type="module">
+        // Absolute path with university server format
+        import { app, db } from '/~pmezzich/r6tracker/firebase/firebase-config.js?v=2';
+        import { getAuth, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
+        import { ref, set, get } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
+
+        const auth = getAuth(app);
+
+        document.getElementById('teamCreationForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const teamName = document.getElementById('teamName').value.trim();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            if (!teamName || !email || !password) {
+                alert('Please fill in all fields');
+                return;
+            }
+
+            try {
+                // Generate team ID
+                const teamId = teamName.toLowerCase()
+                    .replace(/\s+/g, '_')
+                    .replace(/[^a-z0-9_]/g, '')
+                    .substring(0, 28);
+
+                // Check team existence
+                const teamRef = ref(db, `teams/${teamId}`);
+                const teamSnapshot = await get(teamRef);
+                
+                if (teamSnapshot.exists()) {
+                    throw new Error(`Team name "${teamName}" is already taken. Try adding numbers or abbreviations.`);
+                }
+
+                // Create user account
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                const user = userCredential.user;
+
+                // Team data structure
+                const teamData = {
+                    info: {
+                        teamName: teamName,
+                        created: new Date().toISOString(),
+                        owner: user.uid
+                    },
+                    players: {
+                        [user.uid]: {
+                            displayName: "Team Captain",
+                            username: email.split('@')[0],
+                            role: "captain",
+                            joinedAt: new Date().toISOString(),
+                            lastActive: new Date().toISOString()
+                        }
+                    },
+                    subscription: {
+                        status: "active",
+                        plan: "pro_monthly",
+                        startDate: new Date().toISOString(),
+                        renewalDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                        paymentMethod: "stripe"
+                    }
+                };
+
+                // User profile data
+                const userData = {
+                    email: email,
+                    teamId: teamId,
+                    role: "captain",
+                    createdAt: new Date().toISOString(),
+                    lastLogin: new Date().toISOString()
+                };
+
+                // Database write operations
+                await Promise.all([
+                    set(ref(db, `teams/${teamId}`), teamData),
+                    set(ref(db, `users/${user.uid}`), userData),
+                    set(ref(db, `team_registry/${teamId}`), { owner: user.uid })
+                ]);
+
+                // Success handling
+                sessionStorage.setItem('newTeamCreated', 'true');
+                window.location.href = `index.html?team=${encodeURIComponent(teamId)}`;
+                
+            } catch (error) {
+                console.error('Team creation error:', error);
+                alert(`Team creation failed: ${error.message}`);
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Team Stats - R6 Tracker</title>
+    <link rel="stylesheet" href="../styles/styles.css">
+    <link rel="stylesheet" href="../styles/team-stats-styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+</head>
+<body>
+    <!-- Login Section -->
+    <div class="auth-container" id="loginSection">
+        <h2>Team Login</h2>
+        <form id="loginForm">
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="loginEmail" class="form-input" required>
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="loginPassword" class="form-input" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Login</button>
+        </form>
+    </div>
+
+    <!-- Stats Content -->
+    <div class="container" id="statsContent" style="display: none;">
+        <div class="nav-header">
+            <div>
+                <button class="btn btn-secondary" onclick="window.location.href='index.html'">⬅️ Back</button>
+                <span id="teamName" class="team-name"></span>
+            </div>
+            <h1>📈 Team Statistics</h1>
+            <button class="btn btn-danger" onclick="logout()">Logout</button>
+        </div>
+
+        <div class="team-stats-container">
+            <!-- Time Filter -->
+            <div class="time-filter">
+                <button class="btn btn-primary active" onclick="updateTimeFilter('all')">All Scrims</button>
+                <button class="btn btn-primary" onclick="updateTimeFilter('week')">Past Week</button>
+                <button class="btn btn-primary" onclick="updateTimeFilter('month')">Past Month</button>
+            </div>
+
+            <!-- Rating Graph -->
+            <div class="chart-container">
+                <canvas id="ratingChart"></canvas>
+            </div>
+
+            <!-- Stats Grid -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Team Rating</div>
+                    <div class="stat-value" id="teamRating">-</div>
+                    <div class="stat-subtext">Overall Performance</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Survival Rate</div>
+                    <div class="stat-value" id="survivalRate">-</div>
+                    <div class="stat-subtext">Player Average</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg KD</div>
+                    <div class="stat-value" id="avgKD">-</div>
+                    <div class="stat-subtext">Kills/Deaths</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Plant Score</div>
+                    <div class="stat-value" id="plantScore">-</div>
+                    <div class="stat-subtext">🌱 vs 💣</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Map Bonus</div>
+                    <div class="stat-value" id="mapBonus">-</div>
+                    <div class="stat-subtext">vs Average</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Time Wins</div>
+                    <div class="stat-value" id="timeWins">-</div>
+                    <div class="stat-subtext">⏱️ Clutches</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Current Streak</div>
+                    <div class="stat-value" id="currentStreak">-</div>
+                    <div class="stat-subtext" id="streakType"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="loading-spinner"></div>
+        <p>Loading Team Stats...</p>
+    </div>
+
+    <script>
+        (function() {
+            const firebaseConfig = {
+                apiKey: "AIzaSyBRrm0ZrKfhrBWa7A0VghOz82ufJvHeJqI",
+                authDomain: "r6stattracker.firebaseapp.com",
+                databaseURL: "https://r6stattracker-default-rtdb.firebaseio.com",
+                projectId: "r6stattracker",
+                storageBucket: "r6stattracker.appspot.com",
+                messagingSenderId: "575541861129",
+                appId: "1:575541861129:web:28682f4fc01279e46651d8",
+                measurementId: "G-TN7LJDJP3R"
+            };
+
+            const app = firebase.initializeApp(firebaseConfig);
+            const auth = firebase.auth();
+            const db = firebase.database();
+            
+            let ratingChart = null;
+            let currentFilter = 'all';
+            let allMatches = [];
+            let currentTeamId = null;
+
+            const MAP_WIN_RATES = {
+                'Bank': { attack: 47.72, defense: 52.28 },
+                'Border': { attack: 48.1, defense: 51.9 },
+                'Chalet': { attack: 49.37, defense: 50.63 },
+                'Club House': { attack: 44.66, defense: 55.34 },
+                'Coastline': { attack: 50.59, defense: 49.41 },
+                'Consulate': { attack: 44.81, defense: 55.19 },
+                'Kafe Dostoyevsky': { attack: 43.45, defense: 56.55 },
+                'Oregon': { attack: 44.48, defense: 55.52 },
+                'Villa': { attack: 43.19, defense: 56.81 },
+                'Theme Park': { attack: 39.37, defense: 60.63 },
+                'Skyscraper': { attack: 40.07, defense: 59.93 },
+                'Nighthaven Labs': { attack: 42.74, defense: 57.26 }
+            };
+
+            auth.onAuthStateChanged(async (user) => {
+                const loginSection = document.getElementById('loginSection');
+                const statsContent = document.getElementById('statsContent');
+                const loadingOverlay = document.getElementById('loadingOverlay');
+
+                loginSection.style.display = user ? 'none' : 'block';
+                statsContent.style.display = user ? 'block' : 'none';
+                if (!user) return;
+
+                try {
+                    loadingOverlay.style.display = 'flex';
+                    
+                    const teamId = (await db.ref(`users/${user.uid}/teamId`).once('value')).val();
+                    if (!teamId) throw new Error("No team association");
+                    currentTeamId = teamId;
+
+                    const teamSnap = await db.ref(`teams/${teamId}/info`).once('value');
+                    document.getElementById('teamName').textContent = teamSnap.val().teamName;
+
+                    const matchesSnap = await db.ref(`teams/${teamId}/matches`).once('value');
+                    allMatches = processMatchData(matchesSnap);
+                    
+                    updateTimeFilter('all');
+                    
+                } catch (error) {
+                    console.error("Error loading data:", error);
+                    showError(error.message);
+                    auth.signOut();
+                } finally {
+                    loadingOverlay.style.display = 'none';
+                }
+            });
+
+            function processMatchData(snapshot) {
+                const matches = [];
+                snapshot.forEach(match => {
+                    const matchData = match.val();
+                    if (matchData && matchData.maps) {
+                        matches.push({
+                            id: match.key,
+                            ...matchData,
+                            timestamp: new Date(matchData.timestamp)
+                        });
+                    }
+                });
+                return matches.sort((a, b) => a.timestamp - b.timestamp);
+            }
+
+            function calculateTeamStats(matches) {
+                let totalKills = 0, totalDeaths = 0, totalPlayers = 0;
+                let plants = 0, plantedAgainst = 0, timeWins = 0;
+                const allSurvivalRates = [];
+                const ratingData = [];
+                let currentStreak = 0, streakBonus = 0;
+
+                matches.forEach((match, index) => {
+                    let mapWins = 0;
+                    let matchSurvivalRates = [];
+                    let matchRatings = [];
+
+                    match.maps?.forEach(map => {
+                        const rounds = map.teamScore + (map.opponentScore || 0);
+                        if (!rounds) return;
+
+                        // Survival Rate
+                        Object.values(map.players || {}).forEach(player => {
+                            const deaths = player.deaths || 0;
+                            const survivalRate = ((rounds - deaths) / rounds * 100) || 0;
+                            matchSurvivalRates.push(survivalRate);
+                            totalKills += player.kills || 0;
+                            totalDeaths += deaths;
+                        });
+
+                        // Plants
+                        map.rounds?.forEach(round => {
+                            if (round.outcome?.includes('plant')) {
+                                round.outcome.startsWith('won') ? plants++ : plantedAgainst++;
+                            }
+                            if (round.outcome?.includes('time') && round.outcome.startsWith('won')) {
+                                timeWins++;
+                            }
+                        });
+
+                        // Map performance
+                        const mapData = MAP_WIN_RATES[map.mapName] || { attack: 50, defense: 50 };
+                        const expected = map.startingSide === 'attack' ? mapData.attack : mapData.defense;
+                        const actual = (map.teamScore / rounds * 100) || 0;
+                        const mapBonus = (actual - expected) * 0.5;
+
+                        // Rating calculation
+                        const survivalAvg = matchSurvivalRates.reduce((a, b) => a + b, 0) / matchSurvivalRates.length;
+                        const plantScore = (plants - plantedAgainst * 0.5) * 0.2;
+                        const timeScore = timeWins * 0.2;
+                        const rating = Math.min(100, 
+                            survivalAvg * 0.3 +
+                            mapBonus * 0.35 +
+                            plantScore +
+                            timeScore
+                        );
+                        
+                        matchRatings.push(rating);
+                    });
+
+                    // Track streak
+                    mapWins = match.maps?.filter(m => m.teamScore > m.opponentScore).length || 0;
+                    const isWin = mapWins > (match.maps?.length || 0) / 2;
+                    currentStreak = isWin ? Math.max(currentStreak + 1, 1) : Math.min(currentStreak - 1, -1);
+                    streakBonus += isWin ? Math.log(currentStreak) * 0.5 : Math.log(-currentStreak) * -0.3;
+
+                    // Store data
+                    allSurvivalRates.push(...matchSurvivalRates);
+                    ratingData.push(...matchRatings);
+                });
+
+                // Final calculations
+                const survivalRate = allSurvivalRates.length 
+                    ? (allSurvivalRates.reduce((a, b) => a + b, 0) / allSurvivalRates.length).toFixed(1)
+                    : 0;
+
+                const teamRating = ratingData.length 
+                    ? (ratingData.reduce((a, b) => a + b, 0) / ratingData.length).toFixed(1)
+                    : 0;
+
+                return {
+                    survivalRate,
+                    teamRating,
+                    avgKD: totalDeaths ? (totalKills / totalDeaths).toFixed(2) : '-',
+                    plantScore: (plants - plantedAgainst * 0.5).toFixed(1),
+                    timeWins,
+                    currentStreak,
+                    ratingData
+                };
+            }
+
+            function updateTimeFilter(filter) {
+                currentFilter = filter;
+                const now = new Date();
+                const filteredMatches = allMatches.filter(match => {
+                    const matchDate = new Date(match.timestamp);
+                    switch(filter) {
+                        case 'week': return (now - matchDate) <= 604800000;
+                        case 'month': return (now - matchDate) <= 2592000000;
+                        default: return true;
+                    }
+                });
+
+                const stats = calculateTeamStats(filteredMatches);
+                updateStatsDisplay(stats);
+                updateRatingChart(stats.ratingData);
+            }
+
+            function updateStatsDisplay(stats) {
+                document.getElementById('teamRating').textContent = stats.teamRating;
+                document.getElementById('survivalRate').textContent = `${stats.survivalRate}%`;
+                document.getElementById('avgKD').textContent = stats.avgKD;
+                document.getElementById('plantScore').textContent = stats.plantScore;
+                document.getElementById('timeWins').textContent = stats.timeWins;
+                
+                const streakElement = document.getElementById('currentStreak');
+                const streakType = document.getElementById('streakType');
+                streakElement.textContent = Math.abs(stats.currentStreak);
+                streakElement.style.color = stats.currentStreak > 0 ? '#10B981' : '#EF4444';
+                streakType.textContent = stats.currentStreak > 0 ? 'Winning Streak' : 'Losing Streak';
+            }
+
+            function updateRatingChart(ratingData) {
+                const ctx = document.getElementById('ratingChart').getContext('2d');
+                if(ratingChart) ratingChart.destroy();
+                
+                ratingChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: ratingData.map((_, i) => `Match ${i + 1}`),
+                        datasets: [{
+                            label: 'Performance Rating',
+                            data: ratingData,
+                            borderColor: '#7C3AED',
+                            backgroundColor: 'rgba(124, 58, 237, 0.1)',
+                            tension: 0.2,
+                            fill: true,
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: false,
+                            tooltip: {
+                                callbacks: {
+                                    label: ctx => `Rating: ${ctx.raw.toFixed(1)}%`
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                min: 0,
+                                max: 100,
+                                ticks: {
+                                    callback: value => `${value}%`,
+                                    color: '#94A3B8'
+                                },
+                                grid: { color: 'rgba(255,255,255,0.05)' }
+                            },
+                            x: {
+                                ticks: { color: '#94A3B8' },
+                                grid: { display: false }
+                            }
+                        }
+                    }
+                });
+            }
+
+            document.getElementById('loginForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const email = document.getElementById('loginEmail').value;
+                const password = document.getElementById('loginPassword').value;
+
+                try {
+                    await auth.signInWithEmailAndPassword(email, password);
+                } catch (error) {
+                    showError('Login failed: ' + error.message);
+                }
+            });
+
+            window.logout = () => {
+                auth.signOut().then(() => {
+                    window.location.href = 'index.html';
+                });
+            };
+
+            function showError(message) {
+                const toast = document.createElement('div');
+                toast.className = 'toast error';
+                toast.textContent = message;
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 5000);
+            }
+        })();
+    </script>
+</body>
+</html>
