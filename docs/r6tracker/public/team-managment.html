@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Team Management - R6 Tracker</title>
+    <link rel="stylesheet" href="../styles/styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Login Section -->
+        <div class="auth-container" id="loginSection">
+            <h2>Team Login</h2>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="loginEmail" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="loginPassword" class="form-input" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Login</button>
+            </form>
+        </div>
+
+        <!-- Management Section -->
+        <div id="managementSection" style="display: none;">
+            <div class="nav-header">
+                <a href="index.html" class="btn btn-secondary">⬅️ Back to Dashboard</a>
+                <div class="team-header">
+                    <h1 id="teamNameDisplay"></h1>
+                    <div class="user-info">
+                        <span id="userDisplayName"></span>
+                        <button class="btn btn-warning" onclick="logout()">Logout</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Captain Section -->
+            <div class="management-section" id="captainSection" style="display: none;">
+                <h2>👑 Captain Tools</h2>
+                <div class="captain-tools">
+                    <div class="tool-card">
+                        <h3>Add New Player</h3>
+                        <form id="addPlayerForm">
+                            <div class="form-group">
+                                <input type="email" id="newPlayerEmail" class="form-input" placeholder="Player Email" required>
+                            </div>
+                            <div class="form-group">
+                                <input type="password" id="newPlayerPassword" class="form-input" placeholder="Temporary Password" required minlength="8">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <input type="text" id="newPlayerUsername" class="form-input" placeholder="Username" required>
+                                </div>
+                                <div class="form-group">
+                                    <input type="text" id="newPlayerDisplayName" class="form-input" placeholder="Display Name" required>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">➕ Add Player</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Team Members -->
+            <div class="management-section">
+                <h2>👥 Team Roster</h2>
+                <div id="teamMembersList" class="player-grid"></div>
+            </div>
+        </div>
+
+        <!-- Loading Overlay -->
+        <div id="loadingOverlay" class="loading-overlay hidden">
+            <div class="loading-spinner"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Correct Firebase imports
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+        import { 
+            getAuth, 
+            signInWithEmailAndPassword, 
+            signOut,
+            createUserWithEmailAndPassword,
+            onAuthStateChanged,
+            EmailAuthProvider,
+            reauthenticateWithCredential,
+            deleteUser
+        } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
+        import { 
+            getDatabase,
+            ref,
+            get,
+            update,
+            onValue
+        } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
+
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyBRrm0ZrKfhrBWa7A0VghOz82ufJvHeJqI",
+            authDomain: "r6stattracker.firebaseapp.com",
+            databaseURL: "https://r6stattracker-default-rtdb.firebaseio.com",
+            projectId: "r6stattracker",
+            storageBucket: "r6stattracker.appspot.com",
+            messagingSenderId: "575541861129",
+            appId: "1:575541861129:web:28682f4fc01279e46651d8",
+            measurementId: "G-TN7LJDJP3R"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getDatabase(app);
+
+        let currentUserData = null;
+
+        // Auth State Listener
+        onAuthStateChanged(auth, async (user) => {
+            const loginSection = document.getElementById('loginSection');
+            const managementSection = document.getElementById('managementSection');
+            const loadingOverlay = document.getElementById('loadingOverlay');
+            
+            try {
+                if (user) {
+                    // Show loading state
+                    loginSection.style.display = 'none';
+                    managementSection.style.display = 'block';
+                    loadingOverlay.classList.remove('hidden');
+
+                    // Load user data
+                    const userSnapshot = await get(ref(db, `users/${user.uid}`));
+                    if (!userSnapshot.exists()) {
+                        throw new Error('User data not found');
+                    }
+                    
+                    currentUserData = userSnapshot.val();
+                    
+                    // Load team data
+                    const teamSnapshot = await get(ref(db, `teams/${currentUserData.teamId}/info`));
+                    if (!teamSnapshot.exists()) {
+                        throw new Error('Team data not found');
+                    }
+
+                    // Update UI
+                    document.getElementById('userDisplayName').textContent = currentUserData.displayName;
+                    document.getElementById('teamNameDisplay').textContent = teamSnapshot.val().teamName;
+
+                    // Show captain tools
+                    document.getElementById('captainSection').style.display = 
+                        currentUserData.role === 'captain' ? 'block' : 'none';
+
+                    // Load team members
+                    loadTeamMembers(currentUserData.teamId, user.uid);
+                } else {
+                    loginSection.style.display = 'block';
+                    managementSection.style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Auth state error:', error);
+                showError('Failed to load user data');
+                await signOut(auth);
+            } finally {
+                loadingOverlay.classList.add('hidden');
+            }
+        });
+
+        // Login Handler
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+            } catch (error) {
+                let message = 'Login failed: ';
+                switch (error.code) {
+                    case 'auth/invalid-email':
+                        message += 'Invalid email format';
+                        break;
+                    case 'auth/user-not-found':
+                    case 'auth/wrong-password':
+                        message += 'Invalid email or password';
+                        break;
+                    default:
+                        message += error.message;
+                }
+                showError(message);
+            }
+        });
+
+        // Load Team Members
+        async function loadTeamMembers(teamId, currentUserId) {
+            onValue(ref(db, `teams/${teamId}/players`), (snapshot) => {
+                const playerList = document.getElementById('teamMembersList');
+                playerList.innerHTML = '';
+                
+                snapshot.forEach((childSnapshot) => {
+                    const player = childSnapshot.val();
+                    const isCurrentUser = childSnapshot.key === currentUserId;
+                    const isCaptain = currentUserData?.role === 'captain';
+                    
+                    playerList.innerHTML += `
+                        <div class="player-card ${isCurrentUser ? 'current-user' : ''}">
+                            <div class="player-header">
+                                <h3>${player.displayName}</h3>
+                                ${isCaptain && !isCurrentUser ? `
+                                    <button class="btn btn-danger btn-sm" 
+                                        onclick="deletePlayer('${childSnapshot.key}', '${player.username}')">
+                                        🗑️ Remove
+                                    </button>
+                                ` : ''}
+                            </div>
+                            <div class="player-details">
+                                <p><span>Role:</span> ${player.role}</p>
+                                <p><span>Username:</span> @${player.username}</p>
+                                ${isCurrentUser ? '<div class="badge">You</div>' : ''}
+                            </div>
+                        </div>
+                    `;
+                });
+            });
+        }
+
+        // Add Player Handler
+        document.getElementById('addPlayerForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('newPlayerEmail').value;
+            const tempPassword = document.getElementById('newPlayerPassword').value;
+            const username = document.getElementById('newPlayerUsername').value;
+            const displayName = document.getElementById('newPlayerDisplayName').value;
+
+            try {
+                const userCredential = await createUserWithEmailAndPassword(auth, email, tempPassword);
+                const newUser = userCredential.user;
+
+                const updates = {};
+                updates[`users/${newUser.uid}`] = {
+                    email: email,
+                    username: username,
+                    displayName: displayName,
+                    role: "player",
+                    teamId: currentUserData.teamId,
+                    tempPassword: true,
+                    joinedAt: new Date().toISOString()
+                };
+                updates[`teams/${currentUserData.teamId}/players/${newUser.uid}`] = {
+                    username: username,
+                    displayName: displayName,
+                    role: "player",
+                    joinedAt: new Date().toISOString()
+                };
+
+                await update(ref(db), updates);
+                showSuccess('Player added successfully!');
+                document.getElementById('addPlayerForm').reset();
+            } catch (error) {
+                showError('Error adding player: ' + error.message);
+            }
+        });
+
+        // Delete Player Function
+        window.deletePlayer = async (playerId, username) => {
+            if (!confirm(`Permanently remove ${username} from your team?`)) return;
+
+            try {
+                const auth = getAuth();
+                const captain = auth.currentUser;
+
+                // Verify player is in captain's team
+                const playerTeamId = (await get(ref(db, `users/${playerId}/teamId`))).val();
+                if (playerTeamId !== currentUserData.teamId) {
+                    throw new Error('Player is not in your team');
+                }
+
+                // Reauthenticate the captain
+                const password = prompt('Please re-enter your password to confirm this action:');
+                if (!password) {
+                    throw new Error('Reauthentication canceled');
+                }
+
+                const credential = EmailAuthProvider.credential(captain.email, password);
+                await reauthenticateWithCredential(captain, credential);
+
+                // Delete user from Authentication (only if deleting self)
+                if (playerId === captain.uid) {
+                    await deleteUser(captain);
+                }
+
+                // Remove from Database
+                const updates = {};
+                updates[`teams/${currentUserData.teamId}/players/${playerId}`] = null;
+                updates[`users/${playerId}`] = null;
+
+                await update(ref(db), updates);
+                showSuccess(`${username} removed from team!`);
+            } catch (error) {
+                console.error('Delete error:', error);
+                showError(`Failed to remove player: ${error.message}`);
+            }
+        };
+
+        // Logout Function
+        window.logout = () => {
+            signOut(auth).then(() => {
+                window.location.href = 'login.html';
+            }).catch((error) => {
+                showError('Logout error: ' + error.message);
+            });
+        };
+
+        // UI Helpers
+        function showError(message) {
+            const toast = document.createElement('div');
+            toast.className = 'toast error';
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 5000);
+        }
+
+        function showSuccess(message) {
+            const toast = document.createElement('div');
+            toast.className = 'toast success';
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+    </script>
+</body>
+</html>
