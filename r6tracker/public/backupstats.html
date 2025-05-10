@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Player Stats - R6 Tracker</title>
+    <link rel="stylesheet" href="../styles/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+</head>
+<body>
+    <!-- Login Section -->
+    <div class="auth-container" id="loginSection">
+        <h2>Team Login</h2>
+        <form id="loginForm">
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="loginEmail" class="form-input" required>
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="loginPassword" class="form-input" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Login</button>
+        </form>
+    </div>
+
+    <!-- Stats Content -->
+    <div class="container" id="statsContent" style="display: none;">
+        <div class="nav-header">
+            <h1>📊 Player Stats</h1>
+            <div>
+                <span id="teamName" class="team-name"></span>
+                <button class="btn btn-secondary" onclick="window.location.href='index.html'">⬅️ Back</button>
+                <button class="btn btn-danger" onclick="logout()">Logout</button>
+            </div>
+        </div>
+
+        <div class="stats-controls">
+            <select id="playerSelect" class="form-input">
+                <option value="">Select Player</option>
+            </select>
+
+            <div class="filter-buttons">
+                <button class="btn btn-primary active" data-filter="overall">Overall</button>
+                <button class="btn btn-primary" data-filter="map">By Map</button>
+                <button class="btn btn-primary" data-filter="opponent">By Opponent</button>
+            </div>
+
+            <div id="mapFilterContainer" class="input-container hidden">
+                <select id="mapFilter" class="form-input">
+                    <option value="">All Maps</option>
+                </select>
+            </div>
+
+            <div id="opponentFilterContainer" class="input-container hidden">
+                <select id="opponentFilter" class="form-input">
+                    <option value="">All Opponents</option>
+                </select>
+            </div>
+
+            <button class="btn btn-success" onclick="loadStats()">🔍 Load Stats</button>
+        </div>
+
+        <div class="stats-results" id="statsResults"></div>
+        <div class="charts-container">
+            <div class="chart-wrapper">
+                <canvas id="kdChart"></canvas>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="survivalChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            const firebaseConfig = {
+                apiKey: "AIzaSyBRrm0ZrKfhrBWa7A0VghOz82ufJvHeJqI",
+                authDomain: "r6stattracker.firebaseapp.com",
+                databaseURL: "https://r6stattracker-default-rtdb.firebaseio.com",
+                projectId: "r6stattracker",
+                storageBucket: "r6stattracker.appspot.com",
+                messagingSenderId: "575541861129",
+                appId: "1:575541861129:web:28682f4fc01279e46651d8",
+                measurementId: "G-TN7LJDJP3R"
+            };
+
+            const app = firebase.initializeApp(firebaseConfig);
+            const auth = firebase.auth();
+            const db = firebase.database();
+            
+            let currentTeamId = null;
+            let playerDisplayNames = {};
+            let kdChart = null;
+            let survivalChart = null;
+
+            // Auth state handler
+            auth.onAuthStateChanged(async (user) => {
+                const loginSection = document.getElementById('loginSection');
+                const statsContent = document.getElementById('statsContent');
+                
+                if (!user) {
+                    loginSection.style.display = 'block';
+                    statsContent.style.display = 'none';
+                    return;
+                }
+
+                try {
+                    // Get team ID
+                    const teamSnapshot = await db.ref(`users/${user.uid}/teamId`).once('value');
+                    currentTeamId = teamSnapshot.val();
+                    if (!currentTeamId) throw new Error("No team association");
+
+                    // Load team name
+                    const teamNameSnapshot = await db.ref(`teams/${currentTeamId}/info/teamName`).once('value');
+                    document.getElementById('teamName').textContent = teamNameSnapshot.val();
+
+                    // Load players
+                    const playersSnap = await db.ref(`teams/${currentTeamId}/players`).once('value');
+                    const playerSelect = document.getElementById('playerSelect');
+                    playerSelect.innerHTML = '<option value="">Select Player</option>';
+
+                    playersSnap.forEach(player => {
+                        const playerData = player.val();
+                        playerDisplayNames[playerData.username] = playerData.displayName;
+                        const option = new Option(playerData.displayName, playerData.username);
+                        playerSelect.add(option);
+                    });
+
+                    // Populate filters
+                    const matchesSnap = await db.ref(`teams/${currentTeamId}/matches`).once('value');
+                    const maps = new Set();
+                    const opponents = new Set();
+
+                    matchesSnap.forEach(match => {
+                        const matchData = match.val();
+                        opponents.add(matchData.opponent);
+                        matchData.maps?.forEach(map => maps.add(map.mapName));
+                    });
+
+                    const mapSelect = document.getElementById('mapFilter');
+                    const opponentSelect = document.getElementById('opponentFilter');
+                    maps.forEach(map => mapSelect.add(new Option(map, map)));
+                    opponents.forEach(opponent => opponentSelect.add(new Option(opponent, opponent)));
+
+                    // Show content
+                    loginSection.style.display = 'none';
+                    statsContent.style.display = 'block';
+
+                } catch (error) {
+                    console.error("Auth error:", error);
+                    showError(error.message);
+                    auth.signOut();
+                }
+            });
+
+            // Login handler
+            document.getElementById('loginForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const email = document.getElementById('loginEmail').value;
+                const password = document.getElementById('loginPassword').value;
+
+                try {
+                    await auth.signInWithEmailAndPassword(email, password);
+                } catch (error) {
+                    showError('Login failed: ' + error.message);
+                }
+            });
+
+            // Stats loading function
+            window.loadStats = async () => {
+                const playerUsername = document.getElementById('playerSelect').value;
+                const displayName = playerDisplayNames[playerUsername];
+                const mapFilter = document.getElementById('mapFilter').value;
+                const opponentFilter = document.getElementById('opponentFilter').value;
+
+                if (!playerUsername) {
+                    showError('Please select a player');
+                    return;
+                }
+
+                try {
+                    const matchesSnap = await db.ref(`teams/${currentTeamId}/matches`).once('value');
+                    if (!matchesSnap.exists()) return;
+
+                    const statsData = {
+                        labels: [],
+                        kdData: [],
+                        survivalData: [],
+                        totalKills: 0,
+                        totalDeaths: 0,
+                        totalRounds: 0
+                    };
+
+                    matchesSnap.forEach(match => {
+                        const matchData = match.val();
+                        if (document.querySelector('.filter-buttons .active').dataset.filter === 'opponent' && 
+                           opponentFilter && matchData.opponent !== opponentFilter) return;
+
+                        matchData.maps?.forEach(map => {
+                            if (document.querySelector('.filter-buttons .active').dataset.filter === 'map' && 
+                               mapFilter && map.mapName !== mapFilter) return;
+                            
+                            const playerStats = map.players?.[playerUsername];
+                            if (!playerStats) return;
+
+                            const rounds = map.teamScore + map.opponentScore;
+                            
+                            // Aggregate totals
+                            statsData.totalKills += playerStats.kills || 0;
+                            statsData.totalDeaths += playerStats.deaths || 0;
+                            statsData.totalRounds += rounds;
+
+                            // Per-map data for charts
+                            const survival = ((rounds - playerStats.deaths) / rounds * 100).toFixed(1);
+                            const kd = (playerStats.kills / (playerStats.deaths || 1)).toFixed(2);
+                            statsData.labels.push(`${map.mapName} vs ${matchData.opponent}`);
+                            statsData.kdData.push(kd);
+                            statsData.survivalData.push(survival);
+                        });
+                    });
+
+                    updateStatsDisplay(displayName, statsData);
+                    updateCharts(statsData);
+                } catch (error) {
+                    showError(error.message);
+                }
+            };
+
+            function updateStatsDisplay(playerName, stats) {
+                const avgKD = stats.totalDeaths > 0 
+                    ? (stats.totalKills / stats.totalDeaths).toFixed(2)
+                    : stats.totalKills.toFixed(2);
+                    
+                const avgSurvival = stats.totalRounds > 0
+                    ? ((stats.totalRounds - stats.totalDeaths) / stats.totalRounds * 100).toFixed(1)
+                    : '0.0';
+
+                const plusMinus = stats.totalKills - stats.totalDeaths;
+
+                document.getElementById('statsResults').innerHTML = `
+                    <div class="stats-card">
+                        <h2>${playerName}'s Stats</h2>
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <div class="stat-label">K/D Ratio</div>
+                                <div class="stat-value">${avgKD}</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">Survival Rate</div>
+                                <div class="stat-value">${avgSurvival}%</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">Total Kills</div>
+                                <div class="stat-value">${stats.totalKills}</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">Total Deaths</div>
+                                <div class="stat-value">${stats.totalDeaths}</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">+/-</div>
+                                <div class="stat-value">${plusMinus}</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">Matches Analyzed</div>
+                                <div class="stat-value">${stats.labels.length}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            function updateCharts(statsData) {
+                const kdCtx = document.getElementById('kdChart').getContext('2d');
+                const survivalCtx = document.getElementById('survivalChart').getContext('2d');
+
+                if(kdChart) kdChart.destroy();
+                if(survivalChart) survivalChart.destroy();
+
+                kdChart = new Chart(kdCtx, {
+                    type: 'line',
+                    data: {
+                        labels: statsData.labels,
+                        datasets: [{
+                            label: 'K/D Ratio',
+                            data: statsData.kdData,
+                            borderColor: '#7C3AED',
+                            tension: 0.1,
+                            fill: false
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            title: { 
+                                display: true, 
+                                text: 'K/D Ratio Trend',
+                                color: '#F1F5F9'
+                            }
+                        },
+                        scales: {
+                            x: { ticks: { color: '#94A3B8' } },
+                            y: { 
+                                beginAtZero: true,
+                                ticks: { color: '#94A3B8' }
+                            }
+                        }
+                    }
+                });
+
+                survivalChart = new Chart(survivalCtx, {
+                    type: 'line',
+                    data: {
+                        labels: statsData.labels,
+                        datasets: [{
+                            label: 'Survival Rate (%)',
+                            data: statsData.survivalData,
+                            borderColor: '#10B981',
+                            tension: 0.1,
+                            fill: false
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            title: { 
+                                display: true, 
+                                text: 'Survival Rate Trend',
+                                color: '#F1F5F9'
+                            }
+                        },
+                        scales: {
+                            x: { ticks: { color: '#94A3B8' } },
+                            y: { 
+                                beginAtZero: true,
+                                max: 100,
+                                ticks: { color: '#94A3B8' }
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Filter button handling
+            document.querySelectorAll('.filter-buttons button').forEach(button => {
+                button.addEventListener('click', function() {
+                    document.querySelectorAll('.filter-buttons button').forEach(btn => 
+                        btn.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    document.getElementById('mapFilterContainer').classList.toggle('hidden', 
+                        this.dataset.filter !== 'map');
+                    document.getElementById('opponentFilterContainer').classList.toggle('hidden', 
+                        this.dataset.filter !== 'opponent');
+                });
+            });
+
+            window.logout = () => {
+                auth.signOut().then(() => {
+                    window.location.href = 'index.html';
+                });
+            };
+
+            function showError(message) {
+                const toast = document.createElement('div');
+                toast.className = 'toast error';
+                toast.textContent = message;
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 5000);
+            }
+        })();
+    </script>
+
+    <style>
+        .stats-controls {
+            display: grid;
+            gap: 1rem;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            margin-bottom: 2rem;
+        }
+
+        #playerSelect {
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F1F5F9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            background-size: 1rem;
+            padding-right: 2.5rem !important;
+            background-color: var(--dark);
+            color: var(--light);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 4px;
+            transition: var(--transition);
+        }
+
+        #playerSelect:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
+        }
+
+        #playerSelect option {
+            background: var(--dark-secondary);
+            color: var(--light);
+            padding: 0.5rem;
+        }
+
+        .charts-container {
+            margin-top: 2rem;
+            display: grid;
+            gap: 2rem;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+        }
+
+        .chart-wrapper {
+            background: var(--dark-secondary);
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+        }
+
+        canvas {
+            max-height: 300px;
+        }
+
+        .input-container {
+            grid-column: 1 / -1;
+        }
+
+        .input-container select {
+            width: 100%;
+            padding: 0.8rem;
+            background: var(--dark);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: var(--light);
+            border-radius: 4px;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .stats-card {
+            background: var(--dark-secondary);
+            padding: 2rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow);
+        }
+
+        .stats-grid {
+            display: grid;
+            gap: 2rem;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 1.5rem;
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            color: var(--primary);
+            font-weight: bold;
+            margin-top: 0.5rem;
+        }
+
+        .stat-label {
+            color: var(--secondary);
+            font-size: 0.9rem;
+        }
+
+        .toast.error {
+            background: #EF4444;
+            color: white;
+            padding: 1rem 2rem;
+            border-radius: 8px;
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .charts-container {
+                grid-template-columns: 1fr;
+            }
+            
+            .stats-controls {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</body>
+</html>

@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Player Comparison - R6 Tracker</title>
+    <link rel="stylesheet" href="../styles/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    <style>
+        /* Custom dropdown styling */
+        select.form-input {
+            background-color: var(--dark) !important;
+            color: var(--light) !important;
+            border: 1px solid rgba(255,255,255,0.1) !important;
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F1F5F9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            background-size: 1rem;
+            padding-right: 2.5rem !important;
+        }
+        
+        select.form-input option {
+            background-color: var(--dark-secondary) !important;
+            color: var(--light) !important;
+        }
+
+        .comparison-controls {
+            display: grid;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .player-select {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .vs-text {
+            color: var(--primary);
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+
+        .charts-container {
+            margin-top: 2rem;
+            display: grid;
+            gap: 2rem;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+        }
+
+        .chart-wrapper {
+            background: var(--dark-secondary);
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+        }
+
+        .playstyle-analysis {
+            background: var(--dark-secondary);
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin: 2rem 0;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .commentary-box {
+            padding: 1rem;
+            background: var(--dark);
+            border-radius: 6px;
+            margin-top: 1rem;
+        }
+
+        .commentary-text {
+            color: var(--secondary);
+            line-height: 1.6;
+            font-size: 0.95rem;
+        }
+
+        .commentary-text strong {
+            color: var(--primary);
+            font-weight: 500;
+        }
+
+        .comparison-grid {
+            display: grid;
+            gap: 2rem;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        }
+
+        .player-stats {
+            background: var(--dark);
+            padding: 1.5rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .stat-item {
+            margin: 1rem 0;
+            padding: 0.5rem;
+            background: var(--dark-secondary);
+            border-radius: 6px;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            color: var(--primary);
+            font-weight: bold;
+        }
+
+        .grade {
+            color: var(--secondary);
+            font-size: 0.9rem;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .filter-input select {
+            background-color: var(--dark) !important;
+            color: var(--light) !important;
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 0.75rem;
+            border-radius: 4px;
+        }
+
+        @media (max-width: 768px) {
+            .player-select {
+                flex-direction: column;
+            }
+            
+            .commentary-text {
+                font-size: 0.875rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Login Section -->
+    <div class="auth-container" id="loginSection">
+        <h2>Team Login</h2>
+        <form id="loginForm">
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="loginEmail" class="form-input" required>
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="loginPassword" class="form-input" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Login</button>
+        </form>
+    </div>
+
+    <!-- Comparison Content -->
+    <div class="container" id="compareContent" style="display: none;">
+        <div class="nav-header">
+            <h1>⚖️ Player Comparison</h1>
+            <div>
+                <span id="teamName" class="team-name"></span>
+                <button class="btn btn-secondary" onclick="window.location.href='index.html'">⬅️ Back</button>
+                <button class="btn btn-danger" onclick="logout()">Logout</button>
+            </div>
+        </div>
+
+        <div class="comparison-controls">
+            <div class="player-select">
+                <select id="player1Select" class="form-input" disabled>
+                    <option value="">Select Player 1</option>
+                </select>
+                <span class="vs-text">VS</span>
+                <select id="player2Select" class="form-input" disabled>
+                    <option value="">Select Player 2</option>
+                </select>
+            </div>
+
+            <div class="comparison-type">
+                <button class="btn btn-primary active" data-type="overall">Overall</button>
+                <button class="btn btn-primary" data-type="map">By Map</button>
+                <button class="btn btn-primary" data-type="opponent">By Opponent</button>
+            </div>
+
+            <div id="mapFilterContainer" class="filter-input hidden">
+                <select id="mapFilter" class="form-input">
+                    <option value="">All Maps</option>
+                </select>
+            </div>
+
+            <div id="opponentFilterContainer" class="filter-input hidden">
+                <select id="opponentFilter" class="form-input">
+                    <option value="">All Opponents</option>
+                </select>
+            </div>
+
+            <div class="filter-input">
+                <select id="scrimCount" class="form-input">
+                    <option value="0">All Scrims</option>
+                    <option value="10">Last 10 Scrims</option>
+                    <option value="20">Last 20 Scrims</option>
+                    <option value="30" selected>Last 30 Scrims</option>
+                    <option value="50">Last 50 Scrims</option>
+                </select>
+            </div>
+
+            <button class="btn btn-success" onclick="runComparison()" disabled>🔍 Compare</button>
+        </div>
+
+        <div id="comparisonResults" class="results-box"></div>
+        <div class="playstyle-analysis">
+            <h3>Playstyle Analysis</h3>
+            <div id="playstyleCommentary" class="commentary-box"></div>
+        </div>
+        <div class="charts-container">
+            <div class="chart-wrapper">
+                <canvas id="ratingChart"></canvas>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="kdChart"></canvas>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="survivalChart"></canvas>
+            </div>
+        </div>
+        <div id="errorToast" class="toast"></div>
+    </div>
+
+    <script>
+        (function() {
+            const firebaseConfig = {
+                apiKey: "AIzaSyBRrm0ZrKfhrBWa7A0VghOz82ufJvHeJqI",
+                authDomain: "r6stattracker.firebaseapp.com",
+                databaseURL: "https://r6stattracker-default-rtdb.firebaseio.com",
+                projectId: "r6stattracker",
+                storageBucket: "r6stattracker.appspot.com",
+                messagingSenderId: "575541861129",
+                appId: "1:575541861129:web:28682f4fc01279e46651d8",
+                measurementId: "G-TN7LJDJP3R"
+            };
+
+            const app = firebase.initializeApp(firebaseConfig);
+            const auth = firebase.auth();
+            const db = firebase.database();
+            
+            let ratingChart = null;
+            let kdChart = null;
+            let survivalChart = null;
+            let currentTeamId = null;
+            let playerDisplayNames = {};
+            let allMaps = new Set();
+            let allOpponents = new Set();
+
+            auth.onAuthStateChanged(async (user) => {
+                const loginSection = document.getElementById('loginSection');
+                const compareContent = document.getElementById('compareContent');
+                
+                if (!user) {
+                    loginSection.style.display = 'block';
+                    compareContent.style.display = 'none';
+                    return;
+                }
+
+                try {
+                    const teamSnapshot = await db.ref(`users/${user.uid}/teamId`).once('value');
+                    currentTeamId = teamSnapshot.val();
+                    if (!currentTeamId) throw new Error("No team association");
+
+                    const teamNameSnapshot = await db.ref(`teams/${currentTeamId}/info/teamName`).once('value');
+                    document.getElementById('teamName').textContent = teamNameSnapshot.val();
+
+                    const playersSnap = await db.ref(`teams/${currentTeamId}/players`).once('value');
+                    const playerSelects = document.querySelectorAll('.player-select select');
+                    
+                    playerSelects.forEach(select => {
+                        select.innerHTML = '<option value="">Select Player</option>';
+                        playersSnap.forEach(player => {
+                            const playerData = player.val();
+                            playerDisplayNames[playerData.username] = playerData.displayName;
+                            const option = new Option(playerData.displayName, playerData.username);
+                            select.add(option);
+                        });
+                        select.disabled = false;
+                    });
+
+                    const matchesSnap = await db.ref(`teams/${currentTeamId}/matches`).once('value');
+                    matchesSnap.forEach(match => {
+                        const matchData = match.val();
+                        allOpponents.add(matchData.opponent);
+                        matchData.maps?.forEach(map => allMaps.add(map.mapName));
+                    });
+
+                    const mapSelect = document.getElementById('mapFilter');
+                    allMaps.forEach(map => mapSelect.add(new Option(map, map)));
+
+                    const opponentSelect = document.getElementById('opponentFilter');
+                    allOpponents.forEach(opponent => opponentSelect.add(new Option(opponent, opponent)));
+
+                    document.querySelector('.btn-success').disabled = false;
+                    loginSection.style.display = 'none';
+                    compareContent.style.display = 'block';
+
+                } catch (error) {
+                    console.error("Auth error:", error);
+                    showError(error.message);
+                    auth.signOut();
+                }
+            });
+
+            document.getElementById('loginForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const email = document.getElementById('loginEmail').value;
+                const password = document.getElementById('loginPassword').value;
+
+                try {
+                    await auth.signInWithEmailAndPassword(email, password);
+                } catch (error) {
+                    showError('Login failed: ' + error.message);
+                }
+            });
+
+            function calculatePlayerRating(playerStats) {
+                const survivalRate = ((playerStats.totalRounds - playerStats.deaths) / playerStats.totalRounds) * 100 || 0;
+                const kd = playerStats.kills / Math.max(playerStats.deaths, 1) || 0;
+                const kpr = playerStats.kills / Math.max(playerStats.totalRounds, 1) || 0;
+                const plusMinus = playerStats.kills - playerStats.deaths;
+
+                const rawScore = 
+                    (survivalRate * 0.5) + 
+                    (Math.min(kd, 5) * 20 * 0.3) +
+                    (Math.min(kpr, 1.5) * 66.67 * 0.1) + 
+                    ((plusMinus + 50) * 0.1);
+
+                return Math.min(100, Math.round(rawScore));
+            }
+
+            function calculateGrade(score) {
+                if (score >= 97) return 'A+';
+                if (score >= 93) return 'A';
+                if (score >= 90) return 'A-';
+                if (score >= 87) return 'B+';
+                if (score >= 83) return 'B';
+                if (score >= 80) return 'B-';
+                if (score >= 77) return 'C+';
+                if (score >= 73) return 'C';
+                if (score >= 70) return 'C-';
+                if (score >= 67) return 'D+';
+                if (score >= 63) return 'D';
+                if (score >= 60) return 'D-';
+                return 'F';
+            }
+
+            function createPlayerStats(player, stats, rating, grade) {
+                const survivalRate = ((stats.totalRounds - stats.deaths) / stats.totalRounds * 100 || 0).toFixed(1);
+                const kd = (stats.kills / Math.max(stats.deaths, 1)).toFixed(2);
+                const kpr = (stats.kills / Math.max(stats.totalRounds, 1)).toFixed(2);
+                const plusMinus = stats.kills - stats.deaths;
+
+                return `
+                    <div class="player-stats">
+                        <h3>${playerDisplayNames[player] || player}</h3>
+                        <div class="stat-item">
+                            <span class="stat-label">Rating</span>
+                            <span class="stat-value rating-value">${rating}</span>
+                            <span class="grade grade-${grade[0]}">${grade}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">K/D Ratio</span>
+                            <span class="stat-value">${kd}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Survival Rate</span>
+                            <span class="stat-value">${survivalRate}%</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Kills/Round</span>
+                            <span class="stat-value">${kpr}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">+/-</span>
+                            <span class="stat-value">${plusMinus}</span>
+                        </div>
+                    </div>
+                `;
+            }
+
+            function generatePlaystyleCommentary(p1Stats, p2Stats) {
+                const analysis = [];
+                
+                if(p1Stats.kills > p2Stats.kills && p1Stats.deaths > p2Stats.deaths) {
+                    analysis.push(
+                        `${p1Stats.name} plays more aggressively, securing more kills (${p1Stats.kills}) but dying more frequently (${p1Stats.deaths}).`,
+                        `${p2Stats.name} adopts a safer approach with fewer kills (${p2Stats.kills}) but better survival (${p2Stats.deaths} deaths).`
+                    );
+                }
+                else if(p1Stats.kills < p2Stats.kills && p1Stats.deaths < p2Stats.deaths) {
+                    analysis.push(
+                        `${p2Stats.name} takes more risks for eliminations (${p2Stats.kills} kills) while ${p1Stats.name} prioritizes survival (only ${p1Stats.deaths} deaths).`
+                    );
+                }
+
+                if(p1Stats.survivalRate > p2Stats.survivalRate + 15) {
+                    analysis.push(
+                        `${p1Stats.name} maintains significantly better positioning (${p1Stats.survivalRate}% survival) compared to ${p2Stats.name}'s ${p2Stats.survivalRate}%.`
+                    );
+                } else if(p1Stats.survivalRate < p2Stats.survivalRate - 15) {
+                    analysis.push(
+                        `${p2Stats.name} survives much longer in rounds (${p2Stats.survivalRate}%) than ${p1Stats.name} (${p1Stats.survivalRate}%), suggesting different positioning strategies.`
+                    );
+                }
+
+                if(p1Stats.kd > p2Stats.kd + 0.5) {
+                    analysis.push(
+                        `With a ${p1Stats.kd.toFixed(2)} K/D ratio, ${p1Stats.name} shows better clutch potential than ${p2Stats.name}'s ${p2Stats.kd.toFixed(2)} ratio.`
+                    );
+                }
+
+                return analysis.length > 0 
+                    ? analysis.join(' ') 
+                    : "Both players have similar overall performance profiles. Differences emerge in specific map scenarios.";
+            }
+
+            window.runComparison = async () => {
+                try {
+                    const player1 = document.getElementById('player1Select').value;
+                    const player2 = document.getElementById('player2Select').value;
+                    const comparisonType = document.querySelector('.comparison-type .active').dataset.type;
+                    const mapFilter = document.getElementById('mapFilter').value;
+                    const opponentFilter = document.getElementById('opponentFilter').value;
+                    const scrimCount = parseInt(document.getElementById('scrimCount').value);
+
+                    if (!currentTeamId) throw new Error("Please select a team first");
+                    if (!player1 || !player2) throw new Error("Please select both players");
+                    if (comparisonType === 'map' && !mapFilter) throw new Error("Please select a map");
+                    if (comparisonType === 'opponent' && !opponentFilter) throw new Error("Please select an opponent");
+
+                    const matchesRef = db.ref(`teams/${currentTeamId}/matches`);
+                    const snapshot = await matchesRef.once('value');
+                    if (!snapshot.exists()) throw new Error("No matches found");
+
+                    // Process and sort matches
+                    let matches = [];
+                    snapshot.forEach(match => {
+                        matches.push({
+                            key: match.key,
+                            ...match.val(),
+                            timestamp: match.val().timestamp || 0
+                        });
+                    });
+
+                    // Sort by timestamp descending and apply scrim count
+                    matches.sort((a, b) => b.timestamp - a.timestamp);
+                    if (scrimCount > 0) {
+                        matches = matches.slice(0, scrimCount);
+                    }
+
+                    const stats = {
+                        [player1]: { kills: 0, deaths: 0, totalRounds: 0 },
+                        [player2]: { kills: 0, deaths: 0, totalRounds: 0 }
+                    };
+
+                    // Process filtered matches
+                    matches.forEach(match => {
+                        const matchData = match;
+                        if (comparisonType === 'opponent' && matchData.opponent !== opponentFilter) return;
+
+                        matchData.maps?.forEach(map => {
+                            if (comparisonType === 'map' && map.mapName !== mapFilter) return;
+                            const rounds = map.teamScore + map.opponentScore;
+
+                            [player1, player2].forEach(player => {
+                                const playerData = map.players?.[player];
+                                if (playerData) {
+                                    stats[player].kills += playerData.kills || 0;
+                                    stats[player].deaths += playerData.deaths || 0;
+                                    stats[player].totalRounds += rounds;
+                                }
+                            });
+                        });
+                    });
+
+                    [player1, player2].forEach(player => {
+                        stats[player].survival = stats[player].totalRounds > 0 
+                            ? ((stats[player].totalRounds - stats[player].deaths) / stats[player].totalRounds * 100).toFixed(1)
+                            : 0;
+                        stats[player].kd = stats[player].deaths > 0 
+                            ? stats[player].kills / stats[player].deaths
+                            : stats[player].kills;
+                    });
+
+                    displayResults(player1, player2, stats);
+                    generateCommentary(player1, player2, stats);
+                    updateCharts(stats);
+
+                } catch (error) {
+                    showError(error.message);
+                }
+            };
+
+            function displayResults(p1, p2, stats) {
+                const p1Rating = calculatePlayerRating(stats[p1]);
+                const p2Rating = calculatePlayerRating(stats[p2]);
+                const p1Grade = calculateGrade(p1Rating);
+                const p2Grade = calculateGrade(p2Rating);
+
+                const resultsHTML = `
+                    <div class="comparison-header">
+                        <h2>${getComparisonTitle()}</h2>
+                        <div class="match-count">
+                            Matches compared: ${Object.keys(stats).reduce((acc, cur) => Math.max(acc, stats[cur].totalRounds), 0)}
+                        </div>
+                    </div>
+                    <div class="comparison-grid">
+                        ${createPlayerStats(p1, stats[p1], p1Rating, p1Grade)}
+                        ${createPlayerStats(p2, stats[p2], p2Rating, p2Grade)}
+                    </div>
+                `;
+                document.getElementById('comparisonResults').innerHTML = resultsHTML;
+            }
+
+            function generateCommentary(p1, p2, stats) {
+                const p1Stats = {
+                    name: playerDisplayNames[p1] || p1,
+                    kills: stats[p1].kills,
+                    deaths: stats[p1].deaths,
+                    survivalRate: stats[p1].survival,
+                    kd: stats[p1].kd
+                };
+                
+                const p2Stats = {
+                    name: playerDisplayNames[p2] || p2,
+                    kills: stats[p2].kills,
+                    deaths: stats[p2].deaths,
+                    survivalRate: stats[p2].survival,
+                    kd: stats[p2].kd
+                };
+
+                const commentary = generatePlaystyleCommentary(p1Stats, p2Stats);
+                document.getElementById('playstyleCommentary').innerHTML = `
+                    <div class="commentary-text">
+                        ${commentary}
+                    </div>
+                `;
+            }
+
+            function updateCharts(stats) {
+                const p1Data = stats[document.getElementById('player1Select').value];
+                const p2Data = stats[document.getElementById('player2Select').value];
+
+                if(ratingChart) ratingChart.destroy();
+                if(kdChart) kdChart.destroy();
+                if(survivalChart) survivalChart.destroy();
+
+                const ratingCtx = document.getElementById('ratingChart').getContext('2d');
+                ratingChart = new Chart(ratingCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Player 1', 'Player 2'],
+                        datasets: [{
+                            label: 'Performance Rating',
+                            data: [calculatePlayerRating(p1Data), calculatePlayerRating(p2Data)],
+                            backgroundColor: [ '#7C3AED', '#10B981' ]
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: { beginAtZero: true, max: 100 }
+                        }
+                    }
+                });
+
+                const kdCtx = document.getElementById('kdChart').getContext('2d');
+                kdChart = new Chart(kdCtx, {
+                    type: 'line',
+                    data: {
+                        labels: ['Kills', 'Deaths'],
+                        datasets: [
+                            {
+                                label: 'Player 1',
+                                data: [p1Data.kills, p1Data.deaths],
+                                borderColor: '#7C3AED',
+                                tension: 0.1
+                            },
+                            {
+                                label: 'Player 2',
+                                data: [p2Data.kills, p2Data.deaths],
+                                borderColor: '#10B981',
+                                tension: 0.1
+                            }
+                        ]
+                    }
+                });
+
+                const survivalCtx = document.getElementById('survivalChart').getContext('2d');
+                survivalChart = new Chart(survivalCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Player 1 Survival', 'Player 2 Survival'],
+                        datasets: [{
+                            data: [p1Data.survival, p2Data.survival],
+                            backgroundColor: [ '#7C3AED', '#10B981' ]
+                        }]
+                    }
+                });
+            }
+
+            function getComparisonTitle() {
+                const type = document.querySelector('.comparison-type .active').dataset.type;
+                const scrimCount = document.getElementById('scrimCount').value;
+                let title = "Overall Comparison";
+                
+                if (scrimCount > 0) title += ` (Last ${scrimCount} Scrims)`;
+                
+                switch(type) {
+                    case 'map': return `${title} - Map: ${document.getElementById('mapFilter').value}`;
+                    case 'opponent': return `${title} - Opponent: ${document.getElementById('opponentFilter').value}`;
+                    default: return title;
+                }
+            }
+
+            window.logout = () => {
+                auth.signOut().then(() => {
+                    window.location.href = 'index.html';
+                });
+            };
+
+            function showError(message) {
+                const toast = document.getElementById('errorToast');
+                toast.textContent = message;
+                toast.classList.add('visible');
+                setTimeout(() => toast.classList.remove('visible'), 5000);
+            }
+
+            document.querySelectorAll('.comparison-type button').forEach(button => {
+                button.addEventListener('click', function() {
+                    document.querySelectorAll('.comparison-type button').forEach(btn => 
+                        btn.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    const filterType = this.dataset.type;
+                    document.getElementById('mapFilter').value = '';
+                    document.getElementById('opponentFilter').value = '';
+                    document.getElementById('mapFilterContainer').classList.toggle('hidden', filterType !== 'map');
+                    document.getElementById('opponentFilterContainer').classList.toggle('hidden', filterType !== 'opponent');
+                });
+            });
+        })();
+    </script>
+</body>
+</html>
