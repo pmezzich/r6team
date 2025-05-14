@@ -3,90 +3,76 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>R6 Replay Upload</title>
+  <title>Upload Match Replay</title>
+  <link rel="stylesheet" href="./styles/matchreplaycss.css">
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
-  <script src="../public/wasm_exec.js"></script>
-  <style>
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
-      color: #f1f1f1;
-      padding: 30px;
-    }
-
-    h1 {
-      font-size: 2rem;
-      margin-bottom: 20px;
-    }
-
-    input[type="file"] {
-      background-color: #1e1e1e;
-      border: 1px solid #444;
-      padding: 10px;
-      color: white;
-      border-radius: 6px;
-      margin-right: 10px;
-    }
-
-    button {
-      background-color: #28a745;
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 6px;
-      cursor: pointer;
-      transition: background-color 0.3s;
-    }
-
-    button:hover {
-      background-color: #218838;
-    }
-
-    .error {
-      color: #ff6b6b;
-      background-color: #2a0000;
-      padding: 10px;
-      border-left: 4px solid red;
-      margin-bottom: 10px;
-    }
-
-    .match-status {
-      background-color: #1f1f1f;
-      border-left: 4px solid #4caf50;
-      margin: 10px 0;
-      padding: 10px;
-      border-radius: 4px;
-      font-size: 0.95rem;
-    }
-  </style>
+  <script src="./firebase/firebase-config.js"></script>
+  <script src="wasm_exec.js"></script>
 </head>
 <body>
-  <h1>🎮 Upload R6 Replay Files</h1>
-  <input type="file" id="replayInput" multiple />
-  <button onclick="startUpload()">Start Upload</button>
-  <div id="status"></div>
+  <div class="main-container">
+    <header class="header">
+      <h1><span class="emoji">📁</span> Upload Match Replay</h1>
+      <nav class="nav-buttons">
+        <a href="index.html" class="btn">🏠 Home</a>
+        <button onclick="logout()" class="btn red">Logout</button>
+      </nav>
+    </header>
+
+    <section class="upload-section">
+      <label for="opponent">Opponent Team Name:</label>
+      <input type="text" id="opponent" placeholder="Enter opponent name..." />
+
+      <div class="file-input-block">
+        <label>Upload Folder for Map 1:</label>
+        <input type="file" id="replayInput0" webkitdirectory directory multiple />
+      </div>
+
+      <div id="map-upload-container"></div>
+
+      <div class="upload-controls">
+        <button class="btn green" onclick="addMapFolder()">➕ Add Map</button>
+        <button class="btn blue" onclick="startUpload()">🚀 Upload Match</button>
+        <button class="btn grey" onclick="toggleRaw()">🗃️ Toggle Raw Data</button>
+      </div>
+    </section>
+
+    <section class="status-section">
+      <div id="status"></div>
+    </section>
+  </div>
 
   <script>
-    // Firebase setup
-    const firebaseConfig = {
-      apiKey: "YOUR_API_KEY",
-      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-      databaseURL: "https://YOUR_PROJECT_ID.firebaseio.com",
-      projectId: "YOUR_PROJECT_ID",
-      storageBucket: "YOUR_PROJECT_ID.appspot.com",
-      messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-      appId: "YOUR_APP_ID"
-    };
-    firebase.initializeApp(firebaseConfig);
+    let mapCounter = 1;
+    let wasmReady = false;
     const db = firebase.database();
 
-    let wasmReady = false;
+    function logout() {
+      // Placeholder logout
+      alert("You have been logged out.");
+    }
+
+    function addMapFolder() {
+      const container = document.getElementById("map-upload-container");
+      const div = document.createElement("div");
+      div.className = "file-input-block";
+      div.innerHTML = `
+        <label>Upload Folder for Map ${mapCounter + 1}:</label>
+        <input type="file" webkitdirectory directory multiple id="replayInput${mapCounter}" />
+      `;
+      container.appendChild(div);
+      mapCounter++;
+    }
+
+    function toggleRaw() {
+      document.body.classList.toggle("show-raw");
+    }
 
     function showError(msg) {
       const status = document.getElementById("status");
       const div = document.createElement("div");
-      div.className = "error";
+      div.className = "error-box";
       div.innerText = msg;
       status.appendChild(div);
     }
@@ -94,87 +80,76 @@
     function log(msg) {
       const status = document.getElementById("status");
       const div = document.createElement("div");
-      div.className = "match-status";
+      div.className = "status-box";
       div.innerText = msg;
       status.appendChild(div);
     }
 
     function initializeWASM() {
       const go = new Go();
-      WebAssembly.instantiateStreaming(fetch("../public/r6-dissect.wasm"), go.importObject)
+      WebAssembly.instantiateStreaming(fetch("r6-dissect.wasm"), go.importObject)
         .then(result => go.run(result.instance))
         .then(() => {
           if (typeof window.dissectReplay === "function") {
             wasmReady = true;
-            console.log("✅ WASM module loaded: dissectReplay is ready");
+            console.log("✅ dissectReplay registered");
           } else {
-            console.error("❌ WASM loaded but dissectReplay not registered");
-            showError("Analysis engine failed to initialize. Try refreshing.");
+            showError("WASM loaded but dissectReplay not registered");
           }
         })
-        .catch(async error => {
-          console.error("WASM initialization failed:", error);
-          showError("Failed to load analysis engine. Retrying...");
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          initializeWASM();
+        .catch(err => {
+          console.error("WASM error:", err);
+          showError("WASM failed to load.");
         });
     }
 
     async function startUpload() {
-      const input = document.getElementById("replayInput");
-      const files = input.files;
+      const opponent = document.getElementById("opponent").value.trim();
+      if (!opponent) {
+        showError("Opponent name is required.");
+        return;
+      }
 
       if (!wasmReady) {
         showError("WASM not yet ready. Please wait a moment and try again.");
         return;
       }
 
-      if (files.length === 0) {
-        showError("Please select at least one .rec file.");
-        return;
-      }
-
       log("🚀 Starting upload process...\n");
-
       let validFiles = 0;
 
-      for (const file of files) {
-        const name = file.name;
-        log(`Processing ${name}...`);
+      for (let i = 0; i < mapCounter; i++) {
+        const input = document.getElementById(`replayInput${i}`);
+        if (!input || input.files.length === 0) continue;
 
-        try {
-          const arrayBuffer = await file.arrayBuffer();
-          const uint8Array = new Uint8Array(arrayBuffer);
+        for (const file of input.files) {
+          if (!file.name.endsWith(".rec")) continue;
 
-          if (typeof window.dissectReplay !== "function") {
-            throw new Error("WASM function dissectReplay not yet loaded");
+          log(`Processing ${file.name}...`);
+          try {
+            const arrayBuffer = await file.arrayBuffer();
+            const uint8Array = new Uint8Array(arrayBuffer);
+            const result = await window.dissectReplay(uint8Array);
+            const data = JSON.parse(result);
+
+            if (data.error) {
+              log(`❌ Error in ${file.name}: ${data.error}`);
+            } else {
+              const matchID = data.matchID || file.name.replace(/\.rec$/i, "");
+              await db.ref(`/pro_matches/${matchID}`).set(data);
+              log(`✅ Uploaded ${file.name} to /pro_matches/${matchID}`);
+              validFiles++;
+            }
+          } catch (err) {
+            log(`❌ Error in ${file.name}: ${err.message}`);
           }
-
-          const result = await Promise.race([
-            window.dissectReplay(uint8Array),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000))
-          ]);
-
-          const data = JSON.parse(result);
-          if (data.error) {
-            log(`❌ Error in ${name}: ${data.error}`);
-          } else {
-            log(`✅ Parsed ${name}: ${data.matchID || "Match data loaded."}`);
-            validFiles++;
-
-            const matchID = data.matchID || name.replace(/\.rec$/i, "");
-            await db.ref(`/pro_matches/${matchID}`).set(data);
-            log(`☁️ Uploaded to Firebase as /pro_matches/${matchID}`);
-          }
-        } catch (err) {
-          log(`❌ Error in ${name}: ${err.message}`);
         }
       }
 
       if (validFiles === 0) {
-        showError("❌ Error: No valid replay files processed - check file formats");
+        showError("❌ No valid .rec files were uploaded.");
       } else {
-        log(`🎉 Upload completed. ${validFiles} file(s) processed successfully.`);
+        log(`🎉 Upload complete. ${validFiles} file(s) processed.`);
       }
     }
 
