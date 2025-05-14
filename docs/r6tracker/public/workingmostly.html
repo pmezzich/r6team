@@ -98,7 +98,7 @@
 
     function initializeWASM() {
       const go = new Go();
-      WebAssembly.instantiateStreaming(fetch("../public/r6-dissect.wasm"), go.importObject)
+      WebAssembly.instantiateStreaming(fetch("r6-dissect.wasm"), go.importObject)
         .then(result => go.run(result.instance))
         .then(() => {
           if (typeof window.dissectReplay === "function") {
