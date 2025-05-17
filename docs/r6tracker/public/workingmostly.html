@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="../styles/matchreplaycss.css">
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
-  <script src="../public/wasm_exec.js"></script>
+  <script src="wasm_exec.js"></script>
   <script>
     const firebaseConfig = {
       apiKey: "AIzaSyBRrm0ZrKfhrBWa7A0VghOz82ufJvHeJqI",
@@ -97,6 +97,11 @@
     }
 
     function initializeWASM() {
+      if (typeof Go !== "function") {
+        showError("WASM runtime not initialized — Go() is undefined.");
+        return;
+      }
+
       const go = new Go();
       WebAssembly.instantiateStreaming(fetch("r6-dissect.wasm"), go.importObject)
         .then(result => go.run(result.instance))
