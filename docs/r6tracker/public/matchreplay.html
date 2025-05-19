@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Upload Match Replay21</title>
+    <title>Upload Match Replay</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -135,6 +135,17 @@
         .raw-data-content.visible {
             display: block;
         }
+
+        .event-item {
+            padding: 0.5rem;
+            margin: 0.25rem 0;
+            background: #2d2d2d;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        .event-kill { border-left: 4px solid #EF4444; }
+        .event-plant { border-left: 4px solid #10B981; }
+        .event-defuse { border-left: 4px solid #3B82F6; }
     </style>
 </head>
 <body>
@@ -179,8 +190,8 @@
         <div id="outputLog" class="output-log"></div>
         <div id="rawDataDump" class="raw-data-content"></div>
         <div id="eventsSection" class="raw-data-content">
-            <h3 style="color: #7C3AED; margin-bottom: 0.5rem;">Match Events</h3>
-            <div id="eventsLog" class="output-log"></div>
+            <h3 style="color: #7C3AED; margin-bottom: 0.5rem;">Match Events Timeline</h3>
+            <div id="eventsLog" class="output-log" style="max-height: 600px;"></div>
         </div>
     </div>
 
@@ -352,7 +363,7 @@
                             const result = await Promise.race([
                                 window.dissectReplay(uint8Array),
                                 new Promise((_, reject) => 
-                                    setTimeout(() => reject(new Error("Processing timeout (5s)")), 5000)
+                                    setTimeout(() => reject(new Error("Processing timeout (5s)"), 5000)
                                 )
                             ]);
                             
@@ -410,28 +421,23 @@
                                     operator: player.operator?.name || "Unknown",
                                     team: data.header?.teams?.[player.teamIndex]?.name || "Unknown"
                                 })),
-                                events: (data.events || []).filter(e => 
-                                    e.type === 'plant' || 
-                                    e.type === 'defuse'
-                                ).map(e => {
+                                events: (data.events || []).map(e => {
+                                    const eventType = e.type?.toLowerCase() || 'unknown';
                                     const eventEntry = {
                                         map: matchData.maps[mapKey].mapName,
                                         round: roundNumber,
-                                        type: e.type,
+                                        type: eventType,
                                         player: e.player?.username || "Unknown",
-                                        timestamp: e.timestamp,
-                                        success: e.success ? "Success" : "Failed"
+                                        target: e.target || null,
+                                        headshot: e.headshot || false,
+                                        timeInSeconds: e.timeInSeconds || 0,
+                                        success: e.success || false
                                     };
+                                    
                                     matchEvents.push(eventEntry);
                                     updateEventsDisplay();
 
-                                    return {
-                                        type: e.type,
-                                        timestamp: e.timestamp,
-                                        player: e.player?.username || "Unknown",
-                                        site: e.site || "Unknown",
-                                        success: e.success || false
-                                    };
+                                    return e;
                                 }),
                                 duration: data.header?.matchDuration || 0,
                                 timestamp: new Date(data.header?.timestamp || Date.now()).toISOString()
@@ -490,9 +496,29 @@
 
         function updateEventsDisplay() {
             const eventsLog = document.getElementById('eventsLog');
-            eventsLog.innerHTML = matchEvents.map(event => 
-                `[Map ${event.map}] Round ${event.round}: ${event.player} ${event.type} - ${event.success} @ ${new Date(event.timestamp).toLocaleTimeString()}`
-            ).join('\n');
+            eventsLog.innerHTML = matchEvents
+                .sort((a, b) => a.timeInSeconds - b.timeInSeconds)
+                .map(event => {
+                    const mins = Math.floor(event.timeInSeconds / 60);
+                    const secs = event.timeInSeconds % 60;
+                    const time = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                    
+                    let details = '';
+                    switch(event.type) {
+                        case 'kill':
+                            details = `${event.player} killed ${event.target || 'unknown'}${event.headshot ? ' (Headshot)' : ''}`;
+                            break;
+                        case 'plant':
+                        case 'defuse':
+                            details = `${event.player} ${event.type} ${event.success ? 'successful' : 'failed'}`;
+                            break;
+                        default:
+                            details = `${event.player} ${event.type}`;
+                    }
+                    
+                    return `<div class="event-item event-${event.type}">[${time}] ${details}</div>`;
+                })
+                .join('');
         }
 
         function toggleEvents() {
