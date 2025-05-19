@@ -196,6 +196,12 @@
         <button onclick="cancelTeamSelection()" class="btn btn-danger" style="width: 100%; margin-top: 1rem;">Cancel Upload</button>
     </div>
 
+    <div id="playerSelection" class="team-selector" style="display: none;">
+        <h3 style="margin-top: 0; color: white;" id="playerPrompt"></h3>
+        <div id="playerOptions"></div>
+        <button onclick="cancelPlayerSelection()" class="btn btn-danger" style="width: 100%; margin-top: 1rem;">Cancel Selection</button>
+    </div>
+
     <div class="container" id="login" style="display: none;">
         <h1>Team Login</h1>
         <input type="email" id="email" placeholder="Email" class="form-input"><br>
@@ -281,7 +287,9 @@
         let isProcessing = false;
         let matchData = null;
         let teamSelectionPromise = null;
+        let playerSelectionPromise = null;
         let referencePlayer = null;
+        let selectedPlayer = null;
         let overtimeCounter = 0;
 
         function getRoundNumber(filename) {
@@ -433,6 +441,35 @@
             showError('Upload canceled - team not selected');
         }
 
+        function showPlayerSelector(players, promptText) {
+            const playerOptions = document.getElementById('playerOptions');
+            playerOptions.innerHTML = '';
+            
+            players.forEach(player => {
+                const btn = document.createElement('button');
+                btn.className = 'team-button';
+                btn.textContent = player.name || player.username || "Unknown Player";
+                btn.onclick = () => {
+                    selectedPlayer = player;
+                    document.getElementById('playerSelection').style.display = 'none';
+                    if (window.resolvePlayerSelection) window.resolvePlayerSelection();
+                };
+                playerOptions.appendChild(btn);
+            });
+
+            document.getElementById('playerPrompt').textContent = promptText;
+            document.getElementById('playerSelection').style.display = 'block';
+            playerSelectionPromise = new Promise((resolve) => {
+                window.resolvePlayerSelection = resolve;
+            });
+        }
+
+        function cancelPlayerSelection() {
+            document.getElementById('playerSelection').style.display = 'none';
+            selectedPlayer = null;
+            if (window.resolvePlayerSelection) window.resolvePlayerSelection();
+        }
+
         async function processQueue() {
             if (!currentUserTeam || !processingQueue.length || isProcessing) return;
             
@@ -456,6 +493,34 @@
                     const msgIndex = output.textContent.split('\n').length - 1;
 
                     try {
+                        const rawMapName = data.header?.map?.name || data.header?.mapInfo?.name;
+                        const formattedMap = rawMapName?.replace(/([a-z])([A-Z])/g, '$1 $2') || "Unknown";
+
+                        if (!matchData.maps[mapKey]) {
+                            matchData.maps[mapKey] = {
+                                mapName: formattedMap,
+                                folderName: rawMapName || `Map_${mapKey.split('_')[1]}`,
+                                rounds: {},
+                                teams: [
+                                    {
+                                        name: document.getElementById('teamName').textContent || "YOUR TEAM",
+                                        startingScore: 0,
+                                        score: 0,
+                                        won: false,
+                                        winCondition: "",
+                                        role: currentUserTeam?.role || 'Attack'
+                                    },
+                                    {
+                                        name: matchData.opponent,
+                                        startingScore: 0,
+                                        score: 0,
+                                        won: false,
+                                        role: currentUserTeam?.role === 'Attack' ? 'Defense' : 'Attack'
+                                    }
+                                ]
+                            };
+                        }
+
                         const players = data.header?.players || [];
                         const player = players.find(p => p.username === referencePlayer);
                         if (player) {
@@ -481,97 +546,77 @@
                         const userRole = currentUserTeam?.role?.toLowerCase?.() || 'unknown';
                         const winningRole = winningTeam?.role?.toLowerCase?.() || 'unknown';
 
-                        if (!matchData.maps[mapKey]) {
-                            matchData.maps[mapKey] = {
-                                mapName: data.header?.map?.name?.replace(/([a-z])([A-Z])/g, '$1 $2') || "Unknown",
-                                folderName: data.header?.map?.name || `Map_${mapKey.split('_')[1]}`,
-                                rounds: {},
-                                teams: [
-                                    {
-                                        name: document.getElementById('teamName').textContent || "YOUR TEAM",
-                                        startingScore: 0,
-                                        score: 0,
-                                        won: false,
-                                        winCondition: "",
-                                        role: currentUserTeam?.role || 'Attack'
-                                    },
-                                    {
-                                        name: matchData.opponent,
-                                        startingScore: 0,
-                                        score: 0,
-                                        won: false,
-                                        role: currentUserTeam?.role === 'Attack' ? 'Defense' : 'Attack'
-                                    }
-                                ]
-                            };
-                        }
-
                         if (winningRole === userRole) {
                             matchData.maps[mapKey].teams[0].score++;
                         } else {
                             matchData.maps[mapKey].teams[1].score++;
                         }
 
-                        const events = data.matchFeedback || [];
+                        const events = data.matchFeedback || data.events || [];
                         const plantEvent = events.find(e => 
-                            String(e.type || '').toLowerCase() === 'plant'
+                            String(e.type || e.eventType || '').toLowerCase().includes('plant')
                         );
                         const defuseEvent = events.find(e => 
-                            String(e.type || '').toLowerCase() === 'defuse'
+                            String(e.type || e.eventType || '').toLowerCase().includes('defuse')
                         );
 
-                        const team1 = data.header?.teams?.[0];
-                        const team2 = data.header?.teams?.[1];
-                        winningTeam = team1?.won ? team1 : team2?.won ? team2 : null;
-                        
-                        const attackers = (data.header?.players || [])
-                            .filter(p => p.teamIndex === 0);
-                        const defenders = (data.header?.players || [])
-                            .filter(p => p.teamIndex === 1);
-
-                        const attackersAlive = attackers.filter(p => p.operator !== null).length;
-                        const defendersAlive = defenders.filter(p => p.operator !== null).length;
-
-                        let outcome = 'unknown';
                         let outcomeReason = 'Unknown';
-                        let winningSide = '';
+                        let planter = null;
+                        let defuser = null;
 
-                        if (winningTeam) {
-                            const winningRole = winningTeam.role.toLowerCase();
-                            winningSide = winningRole;
+                        if (plantEvent) {
+                            const attackers = players
+                                .filter(p => p.teamIndex === 0)
+                                .map(p => ({ 
+                                    username: p.username || "Unknown", 
+                                    operator: p.operator?.name || "Unknown" 
+                                }));
 
-                            if (winningRole === 'attack') {
-                                outcome = 'attackers-win';
-                                if (plantEvent) {
-                                    outcomeReason = defuseEvent 
-                                        ? 'Defused but attackers won (conflict)' 
-                                        : 'Bomb detonated';
-                                } else {
-                                    outcomeReason = defendersAlive === 0 
-                                        ? 'Eliminated defenders' 
-                                        : 'Unknown attack victory';
-                                }
-                            } else {
-                                outcome = 'defenders-win';
-                                if (plantEvent) {
-                                    outcomeReason = defuseEvent 
-                                        ? 'Bomb defused' 
-                                        : 'Attackers eliminated after plant';
-                                } else {
-                                    outcomeReason = attackersAlive === 0
-                                        ? 'Eliminated attackers'
-                                        : 'Time expired';
-                                }
-                            }
+                            await showPlayerSelector(attackers, "Who planted the bomb?");
+                            await playerSelectionPromise;
+                            
+                            planter = selectedPlayer?.username || "Unknown";
+                            outcomeReason = `Planted by ${planter}`;
+                            selectedPlayer = null;
+                        }
+
+                        if (defuseEvent) {
+                            const defenders = players
+                                .filter(p => p.teamIndex === 1)
+                                .map(p => ({ 
+                                    username: p.username || "Unknown", 
+                                    operator: p.operator?.name || "Unknown" 
+                                }));
+
+                            await showPlayerSelector(defenders, "Who defused the bomb?");
+                            await playerSelectionPromise;
+                            
+                            defuser = selectedPlayer?.username || "Unknown";
+                            outcomeReason += defuser ? `, Defused by ${defuser}` : "";
+                            selectedPlayer = null;
+                        }
+
+                        if (!plantEvent && !defuseEvent) {
+                            const attackersAlive = players
+                                .filter(p => p.teamIndex === 0 && p.operator !== null).length;
+                            const defendersAlive = players
+                                .filter(p => p.teamIndex === 1 && p.operator !== null).length;
+
+                            outcomeReason = defendersAlive === 0 
+                                ? 'Eliminated defenders' 
+                                : attackersAlive === 0
+                                    ? 'Eliminated attackers'
+                                    : 'Time expired';
                         }
 
                         matchData.maps[mapKey].rounds[roundNumber] = {
                             site: data.header?.site || "Unknown",
                             spawn: data.header?.spawnInfo?.name || "Unknown",
-                            outcome: outcome,
+                            outcome: winningRole === 'attack' ? 'attackers-win' : 'defenders-win',
                             outcomeReason: outcomeReason,
-                            winningSide: winningSide,
-                            players: (data.header?.players || []).map(player => ({
+                            planter: planter,
+                            defuser: defuser,
+                            players: players.map(player => ({
                                 name: player.username || "Unknown",
                                 operator: player.operator?.name || "Unknown",
                                 team: player.teamIndex !== undefined 
@@ -602,7 +647,6 @@
                 }
                 
                 if (processingQueue.length === 0) {
-                    // Calculate starting scores and win conditions
                     Object.keys(matchData.maps).forEach(mapKey => {
                         const mapData = matchData.maps[mapKey];
                         mapData.teams.forEach(team => {
@@ -613,7 +657,7 @@
                         });
 
                         const lastRound = Object.values(mapData.rounds).pop();
-                        if (lastRound) {
+                        if (lastRound && lastRound.outcomeReason) {
                             const winningTeam = mapData.teams.find(t => t.won);
                             if (winningTeam) {
                                 winningTeam.winCondition = lastRound.outcomeReason
