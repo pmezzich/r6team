@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Upload Match Replay2</title>
+    <title>Upload Match Replay</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -552,70 +552,89 @@
                             matchData.maps[mapKey].teams[1].score++;
                         }
 
-                        const events = data.matchFeedback || data.events || [];
-                        const plantEvent = events.find(e => 
-                            String(e.type || e.eventType || '').toLowerCase().includes('plant')
-                        );
-                        const defuseEvent = events.find(e => 
-                            String(e.type || e.eventType || '').toLowerCase().includes('defuse')
-                        );
+                        const events = (data.matchFeedback || data.events || []).map(e => ({
+                            type: e.type?.name || String(e.type || e.eventType || 'unknown'),
+                            timestamp: e.timestamp || new Date().toISOString(),
+                            details: {
+                                ...(e.details || {}),
+                                ...(e.type?.name === 'Kill' ? {
+                                    killer: e.username,
+                                    victim: e.target,
+                                    headshot: e.headshot,
+                                    timeInRound: e.timeInSeconds
+                                } : {}),
+                                ...(e.type?.name === 'Plant' ? {
+                                    detectedPlanter: e.username,
+                                    userPlanter: null
+                                } : {}),
+                                ...(e.type?.name === 'Defuse' ? {
+                                    detectedDefuser: e.username,
+                                    userDefuser: null
+                                } : {})
+                            }
+                        }));
 
-                        let outcomeReason = 'Unknown';
-                        let planter = null;
-                        let defuser = null;
+                        let planter = { detected: null, user: null };
+                        let defuser = { detected: null, user: null };
+                        const plantEvent = events.find(e => e.type === 'Plant');
+                        const defuseEvent = events.find(e => e.type === 'Defuse');
 
                         if (plantEvent) {
+                            planter.detected = plantEvent.details.detectedPlanter;
                             const attackers = players
                                 .filter(p => p.teamIndex === 0)
-                                .map(p => ({ 
-                                    username: p.username || "Unknown", 
-                                    operator: p.operator?.name || "Unknown" 
+                                .map(p => ({
+                                    username: p.username || "Unknown",
+                                    operator: p.operator?.name || "Unknown"
                                 }));
 
                             await showPlayerSelector(attackers, "Who planted the bomb?");
                             await playerSelectionPromise;
-                            
-                            planter = selectedPlayer?.username || "Unknown";
-                            outcomeReason = `Planted by ${planter}`;
+                            planter.user = selectedPlayer?.username || "Unknown";
+                            plantEvent.details.userPlanter = planter.user;
                             selectedPlayer = null;
                         }
 
                         if (defuseEvent) {
+                            defuser.detected = defuseEvent.details.detectedDefuser;
                             const defenders = players
                                 .filter(p => p.teamIndex === 1)
-                                .map(p => ({ 
-                                    username: p.username || "Unknown", 
-                                    operator: p.operator?.name || "Unknown" 
+                                .map(p => ({
+                                    username: p.username || "Unknown",
+                                    operator: p.operator?.name || "Unknown"
                                 }));
 
                             await showPlayerSelector(defenders, "Who defused the bomb?");
                             await playerSelectionPromise;
-                            
-                            defuser = selectedPlayer?.username || "Unknown";
-                            outcomeReason += defuser ? `, Defused by ${defuser}` : "";
+                            defuser.user = selectedPlayer?.username || "Unknown";
+                            defuseEvent.details.userDefuser = defuser.user;
                             selectedPlayer = null;
                         }
 
-                        if (!plantEvent && !defuseEvent) {
-                            const attackersAlive = players
-                                .filter(p => p.teamIndex === 0 && p.operator !== null).length;
-                            const defendersAlive = players
-                                .filter(p => p.teamIndex === 1 && p.operator !== null).length;
+                        let outcomeReason = [];
+                        if (planter.detected || planter.user) {
+                            outcomeReason.push(`Planted: ${planter.user || planter.detected}`);
+                        }
+                        if (defuser.detected || defuser.user) {
+                            outcomeReason.push(`Defused: ${defuser.user || defuser.detected}`);
+                        }
 
-                            outcomeReason = defendersAlive === 0 
-                                ? 'Eliminated defenders' 
-                                : attackersAlive === 0
-                                    ? 'Eliminated attackers'
-                                    : 'Time expired';
+                        if (outcomeReason.length === 0) {
+                            const attackersAlive = players.filter(p => p.teamIndex === 0 && p.operator !== null).length;
+                            const defendersAlive = players.filter(p => p.teamIndex === 1 && p.operator !== null).length;
+
+                            outcomeReason.push(
+                                defendersAlive === 0 ? 'Eliminated defenders' :
+                                attackersAlive === 0 ? 'Eliminated attackers' :
+                                'Time expired'
+                            );
                         }
 
                         matchData.maps[mapKey].rounds[roundNumber] = {
                             site: data.header?.site || "Unknown",
                             spawn: data.header?.spawnInfo?.name || "Unknown",
                             outcome: winningRole === 'attack' ? 'attackers-win' : 'defenders-win',
-                            outcomeReason: outcomeReason,
-                            planter: planter,
-                            defuser: defuser,
+                            outcomeReason: outcomeReason.join(' | '),
                             players: players.map(player => ({
                                 name: player.username || "Unknown",
                                 operator: player.operator?.name || "Unknown",
@@ -624,18 +643,16 @@
                                     : "Unknown",
                                 isDead: player.operator === null
                             })),
-                            events: events.map(e => ({
-                                type: String(e.type || 'unknown'),
-                                timestamp: e.timestamp || new Date().toISOString(),
-                                details: e.details || {}
-                            })),
+                            events: events,
+                            plantInfo: planter,
+                            defuseInfo: defuser,
                             duration: data.header?.matchDuration || 0,
                             timestamp: new Date(data.header?.timestamp || Date.now()).toISOString()
                         };
 
                         const scoreDisplay = `[${matchData.maps[mapKey].teams[0].score}-${matchData.maps[mapKey].teams[1].score}]`;
                         const updatedLines = output.textContent.split('\n');
-                        updatedLines[msgIndex] = `${processingMsg} ✔️ ${scoreDisplay} ${outcomeReason}`;
+                        updatedLines[msgIndex] = `${processingMsg} ✔️ ${scoreDisplay} ${outcomeReason.join(' | ')}`;
                         output.textContent = updatedLines.join('\n');
 
                     } catch (error) {
