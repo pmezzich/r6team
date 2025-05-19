@@ -180,21 +180,6 @@
     </div>
 
     <script>
-        // Updated operator lists
-        const ATTACK_OPS = new Set([
-            'Striker','Sledge','Thatcher','Ash','Thermite','Montagne','Twitch','Blitz','IQ',
-            'Fuze','Glaz','Buck','Blackbeard','Capitao','Hibana','Jackal','Ying','Zofia',
-            'Dokkaebi','Lion','Finka','Maverick','Nomad','Gridlock','Nokk','Amaru','Kali',
-            'Iana','Ace','Zero','Flores','Osa','Sens','Grim','Brava','Ram','Deimos','Rauora'
-        ]);
-
-        const DEFENSE_OPS = new Set([
-            'Sentry','Mute','Smoke','Castle','Pulse','Doc','Rook','Kapkan','Tachanka',
-            'Jäger','Bandit','Frost','Valkyrie','Caveira','Echo','Mira','Lesion','Ela',
-            'Vigil','Maestro','Alibi','Clash','Kaid','Mozzie','Warden','Goyo','Wamai','Oryx',
-            'Melusi','Aruni','Thunderbird','Thorn','Azami','Solis','Fenrir','Tubarao','Skopos'
-        ]);
-
         const firebaseConfig = {
             apiKey: "AIzaSyBRrm0ZrKfhrBWa7A0VghOz82ufJvHeJqI",
             authDomain: "r6stattracker.firebaseapp.com",
@@ -209,11 +194,6 @@
         const app = firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
         const db = firebase.database();
-
-        if (window.location.hostname === "localhost") {
-            console.log("Using Firebase emulators");
-            auth.useEmulator("http://localhost:9099");
-            db.useEmulator("localhost", 9000);
         }
 
         let teamId = null;
@@ -311,10 +291,6 @@
                 if (!teamId) throw new Error("Not authenticated");
                 if (!currentOpponent) throw new Error("Opponent name required");
 
-                // Get team members from database
-                const teamMembersSnapshot = await db.ref(`teams/${teamId}/members`).get();
-                const teamMembers = new Set(Object.keys(teamMembersSnapshot.val() || {}));
-
                 const uploadBlocks = document.querySelectorAll('.map-upload');
                 const matchData = {
                     opponent: currentOpponent,
@@ -325,22 +301,32 @@
 
                 for (const [mapIndex, block] of uploadBlocks.entries()) {
                     const input = block.querySelector('input');
-                    const files = [...input.files].filter(f => f.name.endsWith(".rec"));
+                    let files = [...input.files].filter(f => f.name.endsWith(".rec"));
                     
+                    // Sort files by round number
+                    files = files.sort((a, b) => {
+                        const aRound = getRoundNumber(a.name);
+                        const bRound = getRoundNumber(b.name);
+                        return aRound - bRound;
+                    });
+
                     if (files.length === 0) continue;
 
-                    const folderName = files[0]?.webkitRelativePath?.split("/")[0] || `Map_${mapIndex+1}`;
                     const mapKey = `map_${mapIndex}`;
+                    let userTeamId = null;
+                    let opponentTeamId = null;
                     
                     matchData.maps[mapKey] = {
                         mapName: "Unknown",
-                        folderName: folderName,
+                        folderName: files[0]?.webkitRelativePath?.split("/")[0] || `Map_${mapIndex+1}`,
                         rounds: {},
                         teamScore: 0,
-                        opponentScore: 0
+                        opponentScore: 0,
+                        userTeamId: "Unknown",
+                        opponentTeamId: "Unknown"
                     };
 
-                    for (const file of files) {
+                    for (const [fileIndex, file] of files.entries()) {
                         const roundNumber = getRoundNumber(file.name);
                         if (!roundNumber) {
                             output.textContent += `\n⚠️ Invalid filename: ${file.name} - skipping`;
@@ -360,63 +346,57 @@
                             ]);
                             
                             const data = JSON.parse(result);
+                            const teams = data.header?.teams || [];
 
+                            // Store raw data
                             rawReplayData[file.name] = {
                                 fileName: file.name,
                                 processedData: data,
                                 rawData: result
                             };
 
+                            // Map detection
                             if (matchData.maps[mapKey].mapName === "Unknown") {
-                                const headerMap = data.header?.map?.name?.replace(/([a-z])([A-Z])/g, '$1 $2');
-                                matchData.maps[mapKey].mapName = headerMap || "Unknown";
+                                matchData.maps[mapKey].mapName = 
+                                    data.header?.map?.name?.replace(/([a-z])([A-Z])/g, '$1 $2') || 
+                                    "Unknown";
                             }
 
-                            // Score calculation logic
-                            const teams = data.header?.teams || [];
-                            let userTeamSide = null;
-
-                            // Find first player from logged-in team
-                            for (const team of teams) {
-                                for (const player of team.players) {
-                                    if (teamMembers.has(player.username)) {
-                                        const op = player.operator?.name || 'Unknown';
-                                        userTeamSide = ATTACK_OPS.has(op) ? 'attack' : 
-                                                     DEFENSE_OPS.has(op) ? 'defense' : null;
-                                        if (userTeamSide) break;
-                                    }
+                            // Team identification (first valid round)
+                            if (!userTeamId && teams.length >= 2) {
+                                const team1 = teams[0];
+                                const team2 = teams[1];
+                                if (team1.id && team2.id) {
+                                    userTeamId = team1.id;
+                                    opponentTeamId = team2.id;
+                                    
+                                    matchData.maps[mapKey].userTeamId = userTeamId;
+                                    matchData.maps[mapKey].opponentTeamId = opponentTeamId;
+                                    
+                                    output.textContent += `\nIdentified teams: ${team1.name} (Your Team) vs ${team2.name} (Opponent)`;
+                                } else {
+                                    console.error('Team IDs are missing in file:', file.name);
+                                    output.textContent += `\n⚠️ Teams missing IDs in ${file.name}`;
                                 }
-                                if (userTeamSide) break;
                             }
 
-                            if (!userTeamSide) {
-                                output.textContent += `\n⚠️ Couldn't determine side for authenticated team`;
-                                continue;
+                            // Score calculation using team IDs
+                            const winningTeam = teams.find(t => t.won);
+                            if (winningTeam && userTeamId && opponentTeamId) {
+                                if (winningTeam.id === userTeamId) {
+                                    matchData.maps[mapKey].teamScore++;
+                                } else if (winningTeam.id === opponentTeamId) {
+                                    matchData.maps[mapKey].opponentScore++;
+                                }
                             }
 
-                            // Get round outcome
-                            const outcome = data.header?.outcome?.toLowerCase() || '';
-                            
-                            // Update scores based on determined side
-                            if (outcome.includes('attack')) {
-                                userTeamSide === 'attack'
-                                    ? matchData.maps[mapKey].teamScore++
-                                    : matchData.maps[mapKey].opponentScore++;
-                            }
-                            else if (outcome.includes('defense')) {
-                                userTeamSide === 'defense'
-                                    ? matchData.maps[mapKey].teamScore++
-                                    : matchData.maps[mapKey].opponentScore++;
-                            }
-
-                            const outcomeDisplay = winningTeam ? 
-                                `${winningTeam.role} ${data.header?.site || "Unknown"}` : 
-                                data.matchFeedback?.outcome || "unknown";
-
+                            // Record round details
                             matchData.maps[mapKey].rounds[roundNumber] = {
                                 site: data.header?.site || "Unknown",
                                 spawn: data.header?.spawnInfo?.name || "Unknown",
-                                outcome: outcomeDisplay,
+                                outcome: winningTeam ? 
+                                    `${winningTeam.role} ${data.header?.site || "Unknown"}` : 
+                                    data.matchFeedback?.outcome || "unknown",
                                 players: (data.header?.players || []).map(player => ({
                                     name: player.username || "Unknown",
                                     operator: player.operator?.name || "Unknown",
@@ -436,7 +416,7 @@
                     }
                 }
 
-                const matchRef = db.ref(`teams/${teamId}/matches_pro`).push();
+                const matchRef = db.ref(`teams/${teamId}/matches`).push();
                 await matchRef.set(matchData);
                 output.textContent += `\n🎉 Match saved! ID: ${matchRef.key}`;
 
