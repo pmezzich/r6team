@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Upload Match Replay21</title>
+    <title>Upload Match Replay87</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -308,7 +308,6 @@
                     const input = block.querySelector('input');
                     let files = [...input.files].filter(f => f.name.endsWith(".rec"));
                     
-                    // Sort files by round number
                     files = files.sort((a, b) => {
                         const aRound = getRoundNumber(a.name);
                         const bRound = getRoundNumber(b.name);
@@ -353,49 +352,46 @@
                             const data = JSON.parse(result);
                             const teams = data.header?.teams || [];
 
-                            // Store raw data
                             rawReplayData[file.name] = {
                                 fileName: file.name,
                                 processedData: data,
                                 rawData: result
                             };
 
-                            // Map detection
                             if (matchData.maps[mapKey].mapName === "Unknown") {
                                 matchData.maps[mapKey].mapName = 
                                     data.header?.map?.name?.replace(/([a-z])([A-Z])/g, '$1 $2') || 
                                     "Unknown";
                             }
 
-                            // Team identification (first valid round)
-                            if (!userTeamId && teams.length >= 2) {
+                            console.log("Teams data:", JSON.stringify(teams, null, 2));
+                            if (teams.length >= 2) {
                                 const team1 = teams[0];
                                 const team2 = teams[1];
-                                if (team1.id && team2.id) {
-                                    userTeamId = team1.id;
-                                    opponentTeamId = team2.id;
+                                
+                                if (!userTeamId) {
+                                    userTeamId = team1.id || team1.name;
+                                    opponentTeamId = team2.id || team2.name;
                                     
                                     matchData.maps[mapKey].userTeamId = userTeamId;
                                     matchData.maps[mapKey].opponentTeamId = opponentTeamId;
                                     
-                                    output.textContent += `\nIdentified teams: ${team1.name} (Your Team) vs ${team2.name} (Opponent)`;
-                                } else {
-                                    console.error('Team IDs are missing in file:', file.name);
-                                    output.textContent += `\n⚠️ Teams missing IDs in ${file.name}`;
+                                    output.textContent += `\nIdentified teams: ${team1.name || 'Unknown'} (Your Team) vs ${team2.name || 'Unknown'} (Opponent)`;
                                 }
+                            } else {
+                                console.error("Insufficient teams in replay:", teams);
+                                output.textContent += `\n⚠️ Invalid team data in ${file.name}`;
                             }
 
-                            // Score calculation using team IDs
                             const winningTeam = teams.find(t => t.won);
                             if (winningTeam && userTeamId && opponentTeamId) {
-                                if (winningTeam.id === userTeamId) {
+                                if (winningTeam.id === userTeamId || winningTeam.name === userTeamId) {
                                     matchData.maps[mapKey].teamScore++;
-                                } else if (winningTeam.id === opponentTeamId) {
+                                } else if (winningTeam.id === opponentTeamId || winningTeam.name === opponentTeamId) {
                                     matchData.maps[mapKey].opponentScore++;
                                 }
                             }
 
-                            // Record round details
                             matchData.maps[mapKey].rounds[roundNumber] = {
                                 site: data.header?.site || "Unknown",
                                 spawn: data.header?.spawnInfo?.name || "Unknown",
