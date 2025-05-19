@@ -431,11 +431,14 @@
                                         target: e.target || null,
                                         headshot: e.headshot || false,
                                         timeInSeconds: e.timeInSeconds || 0,
-                                        success: e.success || false
+                                        success: e.success || false,
+                                        site: e.site || "Unknown"
                                     };
                                     
-                                    matchEvents.push(eventEntry);
-                                    updateEventsDisplay();
+                                    if (['kill', 'plant', 'defuse'].includes(eventType)) {
+                                        matchEvents.push(eventEntry);
+                                        updateEventsDisplay();
+                                    }
 
                                     return e;
                                 }),
@@ -506,11 +509,11 @@
                     let details = '';
                     switch(event.type) {
                         case 'kill':
-                            details = `${event.player} killed ${event.target || 'unknown'}${event.headshot ? ' (Headshot)' : ''}`;
+                            details = `${event.player} killed ${event.target || 'unknown'} at ${event.site}${event.headshot ? ' (Headshot)' : ''}`;
                             break;
                         case 'plant':
                         case 'defuse':
-                            details = `${event.player} ${event.type} ${event.success ? 'successful' : 'failed'}`;
+                            details = `${event.player} ${event.type} ${event.success ? 'successful' : 'failed'} at ${event.site}`;
                             break;
                         default:
                             details = `${event.player} ${event.type}`;
