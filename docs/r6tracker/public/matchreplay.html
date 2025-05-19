@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Upload Match Replay87</title>
+    <title>Upload Match Replay21</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -173,10 +173,15 @@
             <button class="btn btn-secondary" onclick="addMapUpload()">➕ Add Map</button>
             <button class="btn btn-success" onclick="submitReplayData()">🚀 Upload Match</button>
             <button class="raw-data-toggle" onclick="toggleRawData()">📄 Toggle Raw Data</button>
+            <button class="raw-data-toggle" onclick="toggleEvents()">📜 Show Events</button>
         </div>
 
         <div id="outputLog" class="output-log"></div>
         <div id="rawDataDump" class="raw-data-content"></div>
+        <div id="eventsSection" class="raw-data-content">
+            <h3 style="color: #7C3AED; margin-bottom: 0.5rem;">Match Events</h3>
+            <div id="eventsLog" class="output-log"></div>
+        </div>
     </div>
 
     <script>
@@ -205,6 +210,7 @@
         const go = new Go();
         let wasmReady = false;
         let rawReplayData = {};
+        let matchEvents = [];
 
         function getRoundNumber(filename) {
             const match = filename.match(/R(\d+)\.rec/i);
@@ -287,6 +293,7 @@
             const output = document.getElementById('outputLog');
             const opponentInput = document.getElementById('opponentInput');
             rawReplayData = {};
+            matchEvents = [];
             
             const currentOpponent = opponentInput.value.trim();
             output.textContent = '🚀 Starting upload process...\n';
@@ -406,13 +413,26 @@
                                 events: (data.events || []).filter(e => 
                                     e.type === 'plant' || 
                                     e.type === 'defuse'
-                                ).map(e => ({
-                                    type: e.type,
-                                    timestamp: e.timestamp,
-                                    player: e.player?.username || "Unknown",
-                                    site: e.site || "Unknown",
-                                    success: e.success || false
-                                })),
+                                ).map(e => {
+                                    const eventEntry = {
+                                        map: matchData.maps[mapKey].mapName,
+                                        round: roundNumber,
+                                        type: e.type,
+                                        player: e.player?.username || "Unknown",
+                                        timestamp: e.timestamp,
+                                        success: e.success ? "Success" : "Failed"
+                                    };
+                                    matchEvents.push(eventEntry);
+                                    updateEventsDisplay();
+
+                                    return {
+                                        type: e.type,
+                                        timestamp: e.timestamp,
+                                        player: e.player?.username || "Unknown",
+                                        site: e.site || "Unknown",
+                                        success: e.success || false
+                                    };
+                                }),
                                 duration: data.header?.matchDuration || 0,
                                 timestamp: new Date(data.header?.timestamp || Date.now()).toISOString()
                             };
@@ -466,6 +486,18 @@
                 });
                 dumpElement.textContent = formattedData;
             }
+        }
+
+        function updateEventsDisplay() {
+            const eventsLog = document.getElementById('eventsLog');
+            eventsLog.innerHTML = matchEvents.map(event => 
+                `[Map ${event.map}] Round ${event.round}: ${event.player} ${event.type} - ${event.success} @ ${new Date(event.timestamp).toLocaleTimeString()}`
+            ).join('\n');
+        }
+
+        function toggleEvents() {
+            const eventsSection = document.getElementById('eventsSection');
+            eventsSection.classList.toggle('visible');
         }
 
         function showError(message) {
