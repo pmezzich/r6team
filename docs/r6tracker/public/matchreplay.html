@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Upload Match Replay</title>
+    <title>Upload Match Replay32</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -135,48 +135,10 @@
         .raw-data-content.visible {
             display: block;
         }
-
-        .team-select-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.5);
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-        }
-
-        .team-select-content {
-            background: #2d2d2d;
-            padding: 2rem;
-            border-radius: 8px;
-            width: 400px;
-        }
-
-        .team-select-option {
-            padding: 1rem;
-            margin: 0.5rem 0;
-            background: #404040;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-
-        .team-select-option:hover {
-            background: #7C3AED;
-        }
     </style>
 </head>
 <body>
     <div id="errorMessage" class="error-message"></div>
-    <div id="teamSelectModal" class="team-select-modal">
-        <div class="team-select-content">
-            <h3>Select Your Team</h3>
-            <div id="teamOptions"></div>
-        </div>
-    </div>
 
     <div class="container" id="login" style="display: none;">
         <h1>Team Login</h1>
@@ -243,90 +205,10 @@
         const go = new Go();
         let wasmReady = false;
         let rawReplayData = {};
-        let teamSelectionConfirmed = false;
 
         function getRoundNumber(filename) {
-            const match = filename.match(/R0*(\d+)\.rec/i);
+            const match = filename.match(/R(\d+)\.rec/i);
             return match ? parseInt(match[1]) : null;
-        }
-
-        function detectMapFromSiteAndSpawn(site, spawn) {
-            const mapDatabase = {
-                'Bank': {
-                    sites: ['Vault', 'Lockers', 'Open Area', 'Tellers'],
-                    spawns: ['Main Entrance', 'Alley', 'Park']
-                },
-                'Clubhouse': {
-                    sites: ['Cash Room', 'Server Room', 'Church', 'Bedroom'],
-                    spawns: ['Construction', 'Scaffolding', 'Junkyard']
-                },
-                'Oregon': {
-                    sites: ['Laundry', 'Supply', 'Kids', 'Meeting'],
-                    spawns: ['Construction', 'Junkyard', 'Parking']
-                },
-                'Border': {
-                    sites: ['Workshop', 'Bathroom', 'Armory', 'Ventilation'],
-                    spawns: ['East Gate', 'West Gate', 'Valley']
-                },
-                'Chalet': {
-                    sites: ['Library', 'Kitchen', 'Snowmobile', 'Bar'],
-                    spawns: ['Campfire', 'Front Yard', 'Cliffside']
-                },
-                'Kafe Dostoyevsky': {
-                    sites: ['Kitchen', 'Reading', 'Fireplace', 'Cigar'],
-                    spawns: ['Main Entrance', 'Back Alley', 'Roof']
-                },
-                'Consulate': {
-                    sites: ['Garage', 'Lobby', 'Archives', 'Press'],
-                    spawns: ['Police Line', 'Gas Station', 'Side Street']
-                },
-                'Villa': {
-                    sites: ['Aviator', 'Statue', 'Trophy', 'Living'],
-                    spawns: ['Ruins', 'Main Gate', 'Courtyard']
-                },
-                'Theme Park': {
-                    sites: ['Bunk', 'Initiation', 'Office', 'Throne'],
-                    spawns: ['Bus', 'Parking', 'Arcade']
-                },
-                'Coastline': {
-                    sites: ['Hookah', 'Billards', 'Kitchen', 'Sunrise'],
-                    spawns: ['Ruins', 'Main Entrance', 'Sea']
-                },
-                'Skyscraper': {
-                    sites: ['Tea', 'Bedroom', 'Work', 'Exhibit'],
-                    spawns: ['Balcony', 'Garden', 'Lobby']
-                },
-                'Nighthaven Labs': {
-                    sites: ['Control', 'Reception', 'Storage', 'Dorms', 'Command Center', 'Servers'],
-                    spawns: ['Helipad', 'West Entrance', 'East Entrance']
-                },
-                'Emerald Plains': {
-                    sites: ['Office', 'Bar', 'Garage', 'Vault'],
-                    spawns: ['Main Gate', 'Back Alley', 'Garden']
-                },
-                'Favela': {
-                    sites: ['Packaging', 'Football', 'Grow', 'Apartment'],
-                    spawns: ['Construction', 'Street', 'Alley']
-                },
-                'Outback': {
-                    sites: ['Party', 'Office', 'Laundry', 'Garage'],
-                    spawns: ['Parking', 'Road', 'Cliffside']
-                },
-                'Hereford Base': {
-                    sites: ['Basement', 'Training', 'Firing', 'Briefing'],
-                    spawns: ['Main Gate', 'Road', 'Field']
-                }
-            };
-
-            for (const [mapName, data] of Object.entries(mapDatabase)) {
-                const isSiteMatch = data.sites.some(s => site.toLowerCase().includes(s.toLowerCase()));
-                const isSpawnMatch = data.spawns.some(s => spawn.toLowerCase().includes(s.toLowerCase()));
-                
-                if (isSiteMatch && isSpawnMatch) {
-                    return mapName;
-                }
-            }
-            return null;
         }
 
         function initializeWASM() {
@@ -401,32 +283,10 @@
             document.getElementById('mapInputs').appendChild(container);
         }
 
-        function showTeamSelect(teams) {
-            return new Promise((resolve) => {
-                const modal = document.getElementById('teamSelectModal');
-                const optionsContainer = document.getElementById('teamOptions');
-                optionsContainer.innerHTML = '';
-                
-                teams.forEach(team => {
-                    const option = document.createElement('div');
-                    option.className = 'team-select-option';
-                    option.textContent = team.name;
-                    option.onclick = () => {
-                        modal.style.display = 'none';
-                        resolve(team.id);
-                    };
-                    optionsContainer.appendChild(option);
-                });
-                
-                modal.style.display = 'flex';
-            });
-        }
-
         async function submitReplayData() {
             const output = document.getElementById('outputLog');
             const opponentInput = document.getElementById('opponentInput');
             rawReplayData = {};
-            teamSelectionConfirmed = false;
             
             const currentOpponent = opponentInput.value.trim();
             output.textContent = '🚀 Starting upload process...\n';
@@ -448,6 +308,7 @@
                     const input = block.querySelector('input');
                     let files = [...input.files].filter(f => f.name.endsWith(".rec"));
                     
+                    // Sort files by round number
                     files = files.sort((a, b) => {
                         const aRound = getRoundNumber(a.name);
                         const bRound = getRoundNumber(b.name);
@@ -469,9 +330,6 @@
                         userTeamId: "Unknown",
                         opponentTeamId: "Unknown"
                     };
-
-                    let initialTeamProcessed = false;
-                    let resolvedTeams = null;
 
                     for (const [fileIndex, file] of files.entries()) {
                         const roundNumber = getRoundNumber(file.name);
@@ -495,71 +353,49 @@
                             const data = JSON.parse(result);
                             const teams = data.header?.teams || [];
 
+                            // Store raw data
                             rawReplayData[file.name] = {
                                 fileName: file.name,
                                 processedData: data,
                                 rawData: result
                             };
 
+                            // Map detection
                             if (matchData.maps[mapKey].mapName === "Unknown") {
-                                const headerMap = data.header?.map?.name?.replace(/([a-z])([A-Z])/g, '$1 $2');
-                                const site = data.header?.site || "Unknown";
-                                const spawn = data.header?.spawnInfo?.name || "Unknown";
-                                matchData.maps[mapKey].mapName = headerMap || detectMapFromSiteAndSpawn(site, spawn) || "Unknown";
+                                matchData.maps[mapKey].mapName = 
+                                    data.header?.map?.name?.replace(/([a-z])([A-Z])/g, '$1 $2') || 
+                                    "Unknown";
                             }
 
-                            if (!initialTeamProcessed) {
-                                const userTeamName = document.getElementById('teamName').textContent.trim();
-                                let userTeam = teams.find(team => 
-                                    team.name.toLowerCase() === userTeamName.toLowerCase()
-                                );
-
-                                if (!userTeam && teams.length >= 2) {
-                                    output.textContent += `\n⚠️ Could not auto-detect team. Please select your team:`;
-                                    userTeamId = await showTeamSelect(teams);
-                                    userTeam = teams.find(t => t.id === userTeamId);
-                                } else if (userTeam) {
-                                    userTeamId = userTeam.id;
-                                }
-
-                                if (userTeam && teams.length >= 2) {
-                                    opponentTeamId = teams.find(t => t.id !== userTeamId)?.id;
+                            // Team identification (first valid round)
+                            if (!userTeamId && teams.length >= 2) {
+                                const team1 = teams[0];
+                                const team2 = teams[1];
+                                if (team1.id && team2.id) {
+                                    userTeamId = team1.id;
+                                    opponentTeamId = team2.id;
                                     
-                                    if (!userTeamId || !opponentTeamId) {
-                                        throw new Error("Invalid team configuration");
-                                    }
-
                                     matchData.maps[mapKey].userTeamId = userTeamId;
                                     matchData.maps[mapKey].opponentTeamId = opponentTeamId;
                                     
-                                    output.textContent += `\nIdentified teams: ${userTeam.name} (Your Team) vs ${
-                                        teams.find(t => t.id === opponentTeamId)?.name || 'Unknown'
-                                    } (Opponent)`;
-
-                                    resolvedTeams = {
-                                        userTeamId,
-                                        opponentTeamId,
-                                        userTeamName: userTeam.name,
-                                        opponentTeamName: teams.find(t => t.id === opponentTeamId)?.name || 'Unknown'
-                                    };
+                                    output.textContent += `\nIdentified teams: ${team1.name} (Your Team) vs ${team2.name} (Opponent)`;
+                                } else {
+                                    console.error('Team IDs are missing in file:', file.name);
+                                    output.textContent += `\n⚠️ Teams missing IDs in ${file.name}`;
                                 }
-                                
-                                initialTeamProcessed = true;
                             }
 
-                            if (!resolvedTeams) {
-                                throw new Error("Team configuration not resolved");
-                            }
-
+                            // Score calculation using team IDs
                             const winningTeam = teams.find(t => t.won);
-                            if (winningTeam) {
-                                if (winningTeam.id === resolvedTeams.userTeamId) {
+                            if (winningTeam && userTeamId && opponentTeamId) {
+                                if (winningTeam.id === userTeamId) {
                                     matchData.maps[mapKey].teamScore++;
-                                } else if (winningTeam.id === resolvedTeams.opponentTeamId) {
+                                } else if (winningTeam.id === opponentTeamId) {
                                     matchData.maps[mapKey].opponentScore++;
                                 }
                             }
 
+                            // Record round details
                             matchData.maps[mapKey].rounds[roundNumber] = {
                                 site: data.header?.site || "Unknown",
                                 spawn: data.header?.spawnInfo?.name || "Unknown",
@@ -571,7 +407,16 @@
                                     operator: player.operator?.name || "Unknown",
                                     team: data.header?.teams?.[player.teamIndex]?.name || "Unknown"
                                 })),
-                                events: data.matchFeedback || [],
+                                events: (data.events || []).filter(e => 
+                                    e.type === 'plant' || 
+                                    e.type === 'defuse'
+                                ).map(e => ({
+                                    type: e.type,
+                                    timestamp: e.timestamp,
+                                    player: e.player?.username || "Unknown",
+                                    site: e.site || "Unknown",
+                                    success: e.success || false
+                                })),
                                 duration: data.header?.matchDuration || 0,
                                 timestamp: new Date(data.header?.timestamp || Date.now()).toISOString()
                             };
@@ -582,11 +427,6 @@
                             console.error(`Error processing ${file.name}:`, error);
                             output.textContent += `\n❌ Error in ${file.name}: ${error.message}`;
                         }
-                    }
-
-                    if (matchData.maps[mapKey].userTeamId === "Unknown" || 
-                        matchData.maps[mapKey].opponentTeamId === "Unknown") {
-                        throw new Error("Team configuration incomplete for map");
                     }
                 }
 
@@ -604,11 +444,7 @@
 
             } catch (error) {
                 console.error("Error:", error);
-                if (error.message.includes("undefined")) {
-                    showError("Invalid team data - please reselect teams");
-                } else {
-                    showError(error.message);
-                }
+                showError(error.message);
                 output.textContent += `\n❌ Error: ${error.message}`;
                 opponentInput.value = currentOpponent;
             }
