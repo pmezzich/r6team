@@ -245,6 +245,20 @@
     </div>
 
     <script>
+        const ATTACK_OPS = new Set([
+            'Striker','Sledge','Thatcher','Ash','Thermite','Montagne','Twitch','Blitz','IQ',
+            'Fuze','Glaz','Buck','Blackbeard','Capitao','Hibana','Jackal','Ying','Zofia',
+            'Dokkaebi','Lion','Finka','Maverick','Nomad','Gridlock','Nokk','Amaru','Kali',
+            'Iana','Ace','Zero','Flores','Osa','Sens','Grim','Brava','Ram','Deimos','Rauora'
+        ]);
+
+        const DEFENSE_OPS = new Set([
+            'Sentry','Mute','Smoke','Castle','Pulse','Doc','Rook','Kapkan','Tachanka',
+            'Jäger','Bandit','Frost','Valkyrie','Caveira','Echo','Mira','Lesion','Ela',
+            'Vigil','Maestro','Alibi','Clash','Kaid','Mozzie','Warden','Goyo','Wamai','Oryx',
+            'Melusi','Aruni','Thunderbird','Thorn','Azami','Solis','Fenrir','Tubarao','Skopos'
+        ]);
+
         const firebaseConfig = {
             apiKey: "AIzaSyBRrm0ZrKfhrBWa7A0VghOz82ufJvHeJqI",
             authDomain: "r6stattracker.firebaseapp.com",
@@ -404,8 +418,6 @@
                     if (files.length === 0) continue;
 
                     const mapKey = `map_${mapIndex}`;
-                    let userTeamId = null;
-                    let opponentTeamId = null;
                     
                     matchData.maps[mapKey] = {
                         mapName: "Unknown",
@@ -457,7 +469,9 @@
                                 availableTeams = teams.map(t => ({
                                     id: t.id,
                                     name: t.name,
-                                    role: t.role
+                                    role: t.players?.some(p => p.operator && ATTACK_OPS.has(p.operator.name)) 
+                                        ? 'attack' 
+                                        : 'defense'
                                 }));
                                 showTeamSelection(availableTeams);
                                 processingState = {
@@ -469,19 +483,28 @@
                                 return;
                             }
 
-                            const winningTeam = teams.find(t => t.won);
-                            if (winningTeam && selectedTeamId) {
-                                const opponentTeam = availableTeams.find(t => t.id !== selectedTeamId);
+                            const outcome = data.header?.outcome?.toLowerCase() || '';
+                            const teamRole = availableTeams.find(t => t.id === selectedTeamId)?.role?.toLowerCase() || 'attack';
+                            
+                            // Score calculation logic
+                            if (outcome.includes('attack')) {
+                                teamRole === 'attack'
+                                    ? matchData.maps[mapKey].teamScore++
+                                    : matchData.maps[mapKey].opponentScore++;
+                            }
+                            else if (outcome.includes('defense')) {
+                                teamRole === 'defense'
+                                    ? matchData.maps[mapKey].teamScore++
+                                    : matchData.maps[mapKey].opponentScore++;
+                            }
+                            else {
+                                const attackers = (data.header?.players || []).filter(p => 
+                                    p.operator && ATTACK_OPS.has(p.operator.name)
+                                ).length;
                                 
-                                if (winningTeam.id === selectedTeamId) {
-                                    matchData.maps[mapKey].teamScore++;
-                                    matchData.maps[mapKey].userTeamId = selectedTeamId;
-                                    matchData.maps[mapKey].opponentTeamId = opponentTeam?.id || "Unknown";
-                                } else {
-                                    matchData.maps[mapKey].opponentScore++;
-                                    matchData.maps[mapKey].userTeamId = opponentTeam?.id || "Unknown";
-                                    matchData.maps[mapKey].opponentTeamId = selectedTeamId;
-                                }
+                                attackers > 0 
+                                    ? matchData.maps[mapKey].teamScore++
+                                    : matchData.maps[mapKey].opponentScore++;
                             }
 
                             const roundEvents = (data.events || []).map(e => {
@@ -510,9 +533,7 @@
                             matchData.maps[mapKey].rounds[roundNumber] = {
                                 site: data.header?.site || "Unknown",
                                 spawn: data.header?.spawnInfo?.name || "Unknown",
-                                outcome: winningTeam ? 
-                                    `${winningTeam.role} ${data.header?.site || "Unknown"}` : 
-                                    data.matchFeedback?.outcome || "unknown",
+                                outcome: outcome || "unknown",
                                 players: (data.header?.players || []).map(player => ({
                                     name: player.username || "Unknown",
                                     operator: player.operator?.name || "Unknown",
@@ -548,20 +569,15 @@
                         ...matchData,
                         events: eventsWithIds
                     }));
-
-                    console.log('Saving match data:', saveData);
                     
                     try {
                         await matchRef.set(saveData);
-                        console.log('Match data saved');
-
-                        const updates = {};
-                        eventsWithIds.forEach((event, index) => {
-                            updates[`events/${matchId}_${index}`] = event;
-                        });
-
-                        await db.ref().update(updates);
-                        console.log('Events saved');
+                        await db.ref().update(
+                            eventsWithIds.reduce((updates, event, index) => {
+                                updates[`events/${matchId}_${index}`] = event;
+                                return updates;
+                            }, {})
+                        );
 
                         output.textContent += `\n🎉 Match saved! ID: ${matchId}`;
                         updateEventsDisplay();
@@ -651,19 +667,21 @@
                                 const secs = event.timeInSeconds % 60;
                                 const time = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
                                 
+                                const teamRole = availableTeams.find(t => t.id === selectedTeamId)?.role?.toLowerCase();
+                                const teamContext = event.team === selectedTeamId 
+                                    ? `(${teamRole === 'attack' ? 'Attacking' : 'Defending'} Team)` 
+                                    : `(${teamRole === 'attack' ? 'Defending' : 'Attacking'} Team)`;
+
                                 let details = '';
-                                const teamContext = event.team === selectedTeamId ? 
-                                    '(Your Team)' : '(Opponent)';
-                                
                                 switch(event.type) {
                                     case 'kill':
                                         details = `${event.player} ${teamContext} killed ${event.target || 'unknown'} at ${event.site}${event.headshot ? ' (Headshot)' : ''}`;
                                         break;
                                     case 'plant':
                                     case 'defuse':
-                                        const status = event.success ? 'successful' : 
-                                                      (event.completed ? 'completed' : 'failed');
-                                        details = `${event.player} ${teamContext} ${event.type} ${status} at ${event.site}`;
+                                        const verb = event.type === 'plant' ? 'plant' : 'defuse';
+                                        const status = event.success ? 'successful' : 'failed';
+                                        details = `${event.player} ${teamContext} ${verb} ${status} at ${event.site}`;
                                         break;
                                     default:
                                         details = `${event.player} ${teamContext} ${event.type}`;
