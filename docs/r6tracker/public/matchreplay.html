@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Upload Match Replayfe</title>
+    <title>Upload</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -280,6 +280,15 @@
             return match ? parseInt(match[1]) : null;
         }
 
+        function validateMatchData(data) {
+            return Boolean(
+                data.opponent &&
+                data.teamId &&
+                Object.keys(data.maps).length > 0 &&
+                data.date
+            );
+        }
+
         function initializeWASM() {
             WebAssembly.instantiateStreaming(fetch("../public/r6-dissect.wasm"), go.importObject)
                 .then(result => {
@@ -486,7 +495,7 @@
                                     ...eventEntry,
                                     map: matchData.maps[mapKey].mapName,
                                     round: roundNumber,
-                                    matchId: null // Will be set later
+                                    matchId: null
                                 });
 
                                 return eventEntry;
@@ -518,32 +527,49 @@
                 }
 
                 if (!processingState.paused) {
+                    if (!validateMatchData(matchData)) {
+                        throw new Error("Invalid match data structure");
+                    }
+
                     const matchRef = db.ref(`matches_pro`).push();
                     const matchId = matchRef.key;
-                    
-                    // Update events with match ID
-                    matchData.events = matchData.events.map(event => ({
-                        ...event,
-                        matchId
+                    const saveData = JSON.parse(JSON.stringify({
+                        ...matchData,
+                        events: matchData.events.map(event => ({
+                            ...event,
+                            matchId
+                        }))
                     }));
 
-                    await matchRef.set(matchData);
-                    await db.ref(`events`).update(
-                        matchData.events.reduce((acc, event, index) => {
-                            acc[`${matchId}_${index}`] = event;
-                            return acc;
-                        }, {})
-                    );
+                    console.log('Saving match data:', saveData);
+                    
+                    try {
+                        await matchRef.set(saveData);
+                        console.log('Match saved successfully');
+                        
+                        const updates = {};
+                        saveData.events.forEach((event, index) => {
+                            updates[`events/${matchId}_${index}`] = event;
+                        });
+                        
+                        await db.ref().update(updates);
+                        console.log('Events updated successfully');
 
-                    output.textContent += `\n🎉 Match saved! ID: ${matchId}`;
-                    updateEventsDisplay();
-                    opponentInput.value = '';
-                    document.getElementById('mapInputs').innerHTML = `
-                        <div class="map-upload">
-                            <label>Upload Folder for Map 1:</label>
-                            <input type="file" class="folder-upload" webkitdirectory directory multiple>
-                        </div>`;
-                    mapCounter = 1;
+                        output.textContent += `\n🎉 Match saved! ID: ${matchId}`;
+                        updateEventsDisplay();
+                        
+                        opponentInput.value = '';
+                        document.getElementById('mapInputs').innerHTML = `
+                            <div class="map-upload">
+                                <label>Upload Folder for Map 1:</label>
+                                <input type="file" class="folder-upload" webkitdirectory directory multiple>
+                            </div>`;
+                        mapCounter = 1;
+                    } catch (firebaseError) {
+                        console.error('Firebase save error:', firebaseError);
+                        showError(`Save failed: ${firebaseError.message}`);
+                        output.textContent += `\n❌ Failed to save match: ${firebaseError.message}`;
+                    }
                 }
 
             } catch (error) {
