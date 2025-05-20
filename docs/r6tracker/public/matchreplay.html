@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Upload Match Replay43</title>
+    <title>Upload Match Replay</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -146,6 +146,33 @@
         .event-kill { border-left: 4px solid #EF4444; }
         .event-plant { border-left: 4px solid #10B981; }
         .event-defuse { border-left: 4px solid #3B82F6; }
+        .round-event {
+            margin-bottom: 1rem;
+            background: #2d2d2d;
+            border-radius: 4px;
+        }
+        .round-header {
+            padding: 0.75rem;
+            display: flex;
+            justify-content: space-between;
+            cursor: pointer;
+            background: #3d3d3d;
+            border-radius: 4px 4px 0 0;
+        }
+        .round-events {
+            display: none;
+            padding: 0.5rem;
+        }
+        .round-events.visible {
+            display: block;
+        }
+        .toggle-icon {
+            margin-left: 1rem;
+            transition: transform 0.2s;
+        }
+        .toggled .toggle-icon {
+            transform: rotate(180deg);
+        }
     </style>
 </head>
 <body>
@@ -190,8 +217,8 @@
         <div id="outputLog" class="output-log"></div>
         <div id="rawDataDump" class="raw-data-content"></div>
         <div id="eventsSection" class="raw-data-content">
-            <h3 style="color: #7C3AED; margin-bottom: 0.5rem;">Match Events Timeline</h3>
-            <div id="eventsLog" class="output-log" style="max-height: 600px;"></div>
+            <h3 style="color: #7C3AED; margin-bottom: 0.5rem;">Round Events</h3>
+            <div id="roundsAccordion" style="color: white;"></div>
         </div>
     </div>
 
@@ -221,7 +248,7 @@
         const go = new Go();
         let wasmReady = false;
         let rawReplayData = {};
-        let matchEvents = [];
+        let matchData = {};
 
         function getRoundNumber(filename) {
             const match = filename.match(/R(\d+)\.rec/i);
@@ -304,7 +331,7 @@
             const output = document.getElementById('outputLog');
             const opponentInput = document.getElementById('opponentInput');
             rawReplayData = {};
-            matchEvents = [];
+            matchData = {};
             
             const currentOpponent = opponentInput.value.trim();
             output.textContent = '🚀 Starting upload process...\n';
@@ -315,7 +342,7 @@
                 if (!currentOpponent) throw new Error("Opponent name required");
 
                 const uploadBlocks = document.querySelectorAll('.map-upload');
-                const matchData = {
+                matchData = {
                     opponent: currentOpponent,
                     teamId,
                     date: new Date().toISOString(),
@@ -423,24 +450,15 @@
                                 })),
                                 events: (data.events || []).map(e => {
                                     const eventType = e.type?.toLowerCase() || 'unknown';
-                                    const eventEntry = {
-                                        map: matchData.maps[mapKey].mapName,
-                                        round: roundNumber,
+                                    return {
                                         type: eventType,
                                         player: e.player?.username || "Unknown",
                                         target: e.target || null,
                                         headshot: e.headshot || false,
                                         timeInSeconds: e.timeInSeconds || 0,
-                                        success: e.success || false,
-                                        site: e.site || "Unknown"
+                                        success: e.success || e.completed || false,
+                                        site: e.site || e.location || "Unknown"
                                     };
-                                    
-                                    if (['kill', 'plant', 'defuse'].includes(eventType)) {
-                                        matchEvents.push(eventEntry);
-                                        updateEventsDisplay();
-                                    }
-
-                                    return e;
                                 }),
                                 duration: data.header?.matchDuration || 0,
                                 timestamp: new Date(data.header?.timestamp || Date.now()).toISOString()
@@ -455,10 +473,11 @@
                     }
                 }
 
-                const matchRef = db.ref(`teams/${teamId}/matches`).push();
+                const matchRef = db.ref(`teams/${teamId}/matches_pro`).push();
                 await matchRef.set(matchData);
                 output.textContent += `\n🎉 Match saved! ID: ${matchRef.key}`;
 
+                updateEventsDisplay();
                 opponentInput.value = '';
                 document.getElementById('mapInputs').innerHTML = `
                     <div class="map-upload">
@@ -498,30 +517,53 @@
         }
 
         function updateEventsDisplay() {
-            const eventsLog = document.getElementById('eventsLog');
-            eventsLog.innerHTML = matchEvents
-                .sort((a, b) => a.timeInSeconds - b.timeInSeconds)
-                .map(event => {
-                    const mins = Math.floor(event.timeInSeconds / 60);
-                    const secs = event.timeInSeconds % 60;
-                    const time = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-                    
-                    let details = '';
-                    switch(event.type) {
-                        case 'kill':
-                            details = `${event.player} killed ${event.target || 'unknown'} at ${event.site}${event.headshot ? ' (Headshot)' : ''}`;
-                            break;
-                        case 'plant':
-                        case 'defuse':
-                            details = `${event.player} ${event.type} ${event.success ? 'successful' : 'failed'} at ${event.site}`;
-                            break;
-                        default:
-                            details = `${event.player} ${event.type}`;
-                    }
-                    
-                    return `<div class="event-item event-${event.type}">[${time}] ${details}</div>`;
-                })
-                .join('');
+            const accordion = document.getElementById('roundsAccordion');
+            accordion.innerHTML = '';
+            
+            Object.entries(matchData.maps).forEach(([mapKey, mapData]) => {
+                Object.entries(mapData.rounds).forEach(([roundNumber, roundData]) => {
+                    const roundDiv = document.createElement('div');
+                    roundDiv.className = 'round-event';
+                    roundDiv.innerHTML = `
+                        <div class="round-header" onclick="toggleRound(this)">
+                            <span>Map: ${mapData.mapName} - Round ${roundNumber}</span>
+                            <span class="toggle-icon">▼</span>
+                        </div>
+                        <div class="round-events">
+                            ${roundData.events.map(event => {
+                                const mins = Math.floor(event.timeInSeconds / 60);
+                                const secs = event.timeInSeconds % 60;
+                                const time = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                                
+                                let details = '';
+                                switch(event.type) {
+                                    case 'kill':
+                                        details = `${event.player} killed ${event.target || 'unknown'} at ${event.site}${event.headshot ? ' (Headshot)' : ''}`;
+                                        break;
+                                    case 'plant':
+                                    case 'defuse':
+                                        const status = event.success ? 'successful' : 
+                                                      (event.completed ? 'completed' : 'failed');
+                                        details = `${event.player} ${event.type} ${status} at ${event.site}`;
+                                        break;
+                                    default:
+                                        details = `${event.player} ${event.type}`;
+                                }
+                                
+                                return `<div class="event-item event-${event.type}">[${time}] ${details}</div>`;
+                            }).join('')}
+                        </div>
+                    `;
+                    accordion.appendChild(roundDiv);
+                });
+            });
+        }
+
+        function toggleRound(header) {
+            const roundDiv = header.parentElement;
+            const content = roundDiv.querySelector('.round-events');
+            content.classList.toggle('visible');
+            roundDiv.classList.toggle('toggled');
         }
 
         function toggleEvents() {
