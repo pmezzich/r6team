@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Upload Match Replay</title>
+    <title>Upload Match Replayfe</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -173,6 +173,23 @@
         .toggled .toggle-icon {
             transform: rotate(180deg);
         }
+        .team-selection {
+            margin: 1rem 0;
+            padding: 1rem;
+            background: #2d2d2d;
+            border-radius: 4px;
+        }
+        .team-option {
+            padding: 0.5rem;
+            margin: 0.25rem;
+            cursor: pointer;
+            border-radius: 4px;
+            border: 1px solid #404040;
+        }
+        .team-option.selected {
+            background: #7C3AED;
+            border-color: #7C3AED;
+        }
     </style>
 </head>
 <body>
@@ -198,6 +215,11 @@
         <div class="form-group">
             <label>Opponent Team Name:</label>
             <input type="text" id="opponentInput" class="form-input" required>
+        </div>
+
+        <div class="team-selection" id="teamSelection" style="display: none;">
+            <label>Select Your Team:</label>
+            <div id="teamOptions" style="margin-top: 0.5rem;"></div>
         </div>
 
         <div id="mapInputs">
@@ -249,6 +271,9 @@
         let wasmReady = false;
         let rawReplayData = {};
         let matchData = {};
+        let selectedTeamId = null;
+        let availableTeams = [];
+        let processingState = {};
 
         function getRoundNumber(filename) {
             const match = filename.match(/R(\d+)\.rec/i);
@@ -332,6 +357,7 @@
             const opponentInput = document.getElementById('opponentInput');
             rawReplayData = {};
             matchData = {};
+            processingState = {};
             
             const currentOpponent = opponentInput.value.trim();
             output.textContent = '🚀 Starting upload process...\n';
@@ -346,7 +372,14 @@
                     opponent: currentOpponent,
                     teamId,
                     date: new Date().toISOString(),
-                    maps: {}
+                    maps: {},
+                    events: []
+                };
+
+                processingState = {
+                    currentMapIndex: 0,
+                    currentFileIndex: 0,
+                    paused: false
                 };
 
                 for (const [mapIndex, block] of uploadBlocks.entries()) {
@@ -376,6 +409,8 @@
                     };
 
                     for (const [fileIndex, file] of files.entries()) {
+                        if (processingState.paused) break;
+                        
                         const roundNumber = getRoundNumber(file.name);
                         if (!roundNumber) {
                             output.textContent += `\n⚠️ Invalid filename: ${file.name} - skipping`;
@@ -409,33 +444,53 @@
                                     "Unknown";
                             }
 
-                            console.log("Teams data:", JSON.stringify(teams, null, 2));
-                            if (teams.length >= 2) {
-                                const team1 = teams[0];
-                                const team2 = teams[1];
-                                
-                                if (!userTeamId) {
-                                    userTeamId = team1.id || team1.name;
-                                    opponentTeamId = team2.id || team2.name;
-                                    
-                                    matchData.maps[mapKey].userTeamId = userTeamId;
-                                    matchData.maps[mapKey].opponentTeamId = opponentTeamId;
-                                    
-                                    output.textContent += `\nIdentified teams: ${team1.name || 'Unknown'} (Your Team) vs ${team2.name || 'Unknown'} (Opponent)`;
-                                }
-                            } else {
-                                console.error("Insufficient teams in replay:", teams);
-                                output.textContent += `\n⚠️ Invalid team data in ${file.name}`;
+                            if (teams.length >= 2 && availableTeams.length === 0) {
+                                availableTeams = teams.map(t => ({
+                                    id: t.id,
+                                    name: t.name,
+                                    role: t.role
+                                }));
+                                showTeamSelection(availableTeams);
+                                processingState = {
+                                    currentMapIndex: mapIndex,
+                                    currentFileIndex: fileIndex,
+                                    paused: true
+                                };
+                                output.textContent += '\n⏳ Please select your team to continue';
+                                return;
                             }
 
                             const winningTeam = teams.find(t => t.won);
-                            if (winningTeam && userTeamId && opponentTeamId) {
-                                if (winningTeam.id === userTeamId || winningTeam.name === userTeamId) {
+                            if (winningTeam && selectedTeamId) {
+                                if (winningTeam.id === selectedTeamId) {
                                     matchData.maps[mapKey].teamScore++;
-                                } else if (winningTeam.id === opponentTeamId || winningTeam.name === opponentTeamId) {
+                                } else {
                                     matchData.maps[mapKey].opponentScore++;
                                 }
                             }
+
+                            const roundEvents = (data.events || []).map(e => {
+                                const eventType = e.type?.toLowerCase() || 'unknown';
+                                const eventEntry = {
+                                    type: eventType,
+                                    player: e.player?.username || "Unknown",
+                                    target: e.target || null,
+                                    headshot: e.headshot || false,
+                                    timeInSeconds: e.timeInSeconds || 0,
+                                    success: e.success || e.completed || false,
+                                    site: e.site || e.location || "Unknown",
+                                    team: e.teamId || teams[e.teamIndex]?.id || "Unknown"
+                                };
+                                
+                                matchData.events.push({
+                                    ...eventEntry,
+                                    map: matchData.maps[mapKey].mapName,
+                                    round: roundNumber,
+                                    matchId: null // Will be set later
+                                });
+
+                                return eventEntry;
+                            });
 
                             matchData.maps[mapKey].rounds[roundNumber] = {
                                 site: data.header?.site || "Unknown",
@@ -448,18 +503,7 @@
                                     operator: player.operator?.name || "Unknown",
                                     team: data.header?.teams?.[player.teamIndex]?.name || "Unknown"
                                 })),
-                                events: (data.events || []).map(e => {
-                                    const eventType = e.type?.toLowerCase() || 'unknown';
-                                    return {
-                                        type: eventType,
-                                        player: e.player?.username || "Unknown",
-                                        target: e.target || null,
-                                        headshot: e.headshot || false,
-                                        timeInSeconds: e.timeInSeconds || 0,
-                                        success: e.success || e.completed || false,
-                                        site: e.site || e.location || "Unknown"
-                                    };
-                                }),
+                                events: roundEvents,
                                 duration: data.header?.matchDuration || 0,
                                 timestamp: new Date(data.header?.timestamp || Date.now()).toISOString()
                             };
@@ -473,18 +517,34 @@
                     }
                 }
 
-                const matchRef = db.ref(`teams/${teamId}/matches_pro`).push();
-                await matchRef.set(matchData);
-                output.textContent += `\n🎉 Match saved! ID: ${matchRef.key}`;
+                if (!processingState.paused) {
+                    const matchRef = db.ref(`matches_pro`).push();
+                    const matchId = matchRef.key;
+                    
+                    // Update events with match ID
+                    matchData.events = matchData.events.map(event => ({
+                        ...event,
+                        matchId
+                    }));
 
-                updateEventsDisplay();
-                opponentInput.value = '';
-                document.getElementById('mapInputs').innerHTML = `
-                    <div class="map-upload">
-                        <label>Upload Folder for Map 1:</label>
-                        <input type="file" class="folder-upload" webkitdirectory directory multiple>
-                    </div>`;
-                mapCounter = 1;
+                    await matchRef.set(matchData);
+                    await db.ref(`events`).update(
+                        matchData.events.reduce((acc, event, index) => {
+                            acc[`${matchId}_${index}`] = event;
+                            return acc;
+                        }, {})
+                    );
+
+                    output.textContent += `\n🎉 Match saved! ID: ${matchId}`;
+                    updateEventsDisplay();
+                    opponentInput.value = '';
+                    document.getElementById('mapInputs').innerHTML = `
+                        <div class="map-upload">
+                            <label>Upload Folder for Map 1:</label>
+                            <input type="file" class="folder-upload" webkitdirectory directory multiple>
+                        </div>`;
+                    mapCounter = 1;
+                }
 
             } catch (error) {
                 console.error("Error:", error);
@@ -492,6 +552,28 @@
                 output.textContent += `\n❌ Error: ${error.message}`;
                 opponentInput.value = currentOpponent;
             }
+        }
+
+        function showTeamSelection(teams) {
+            const teamOptions = document.getElementById('teamOptions');
+            teamOptions.innerHTML = teams.map(team => `
+                <div class="team-option" 
+                     onclick="selectTeam('${team.id}', '${team.name}')"
+                     data-teamid="${team.id}">
+                    ${team.name} (${team.role})
+                </div>
+            `).join('');
+            document.getElementById('teamSelection').style.display = 'block';
+        }
+
+        function selectTeam(teamId, teamName) {
+            selectedTeamId = teamId;
+            document.querySelectorAll('.team-option').forEach(opt => 
+                opt.classList.remove('selected'));
+            document.querySelector(`[data-teamid="${teamId}"]`).classList.add('selected');
+            document.getElementById('teamSelection').style.display = 'none';
+            processingState.paused = false;
+            submitReplayData();
         }
 
         function toggleRawData() {
@@ -536,18 +618,21 @@
                                 const time = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
                                 
                                 let details = '';
+                                const teamContext = event.team === selectedTeamId ? 
+                                    '(Your Team)' : '(Opponent)';
+                                
                                 switch(event.type) {
                                     case 'kill':
-                                        details = `${event.player} killed ${event.target || 'unknown'} at ${event.site}${event.headshot ? ' (Headshot)' : ''}`;
+                                        details = `${event.player} ${teamContext} killed ${event.target || 'unknown'} at ${event.site}${event.headshot ? ' (Headshot)' : ''}`;
                                         break;
                                     case 'plant':
                                     case 'defuse':
                                         const status = event.success ? 'successful' : 
                                                       (event.completed ? 'completed' : 'failed');
-                                        details = `${event.player} ${event.type} ${status} at ${event.site}`;
+                                        details = `${event.player} ${teamContext} ${event.type} ${status} at ${event.site}`;
                                         break;
                                     default:
-                                        details = `${event.player} ${event.type}`;
+                                        details = `${event.player} ${teamContext} ${event.type}`;
                                 }
                                 
                                 return `<div class="event-item event-${event.type}">[${time}] ${details}</div>`;
