@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Upload</title>
+    <title>Upload Match Replay</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -471,10 +471,16 @@
 
                             const winningTeam = teams.find(t => t.won);
                             if (winningTeam && selectedTeamId) {
+                                const opponentTeam = availableTeams.find(t => t.id !== selectedTeamId);
+                                
                                 if (winningTeam.id === selectedTeamId) {
                                     matchData.maps[mapKey].teamScore++;
+                                    matchData.maps[mapKey].userTeamId = selectedTeamId;
+                                    matchData.maps[mapKey].opponentTeamId = opponentTeam?.id || "Unknown";
                                 } else {
                                     matchData.maps[mapKey].opponentScore++;
+                                    matchData.maps[mapKey].userTeamId = opponentTeam?.id || "Unknown";
+                                    matchData.maps[mapKey].opponentTeamId = selectedTeamId;
                                 }
                             }
 
@@ -488,14 +494,14 @@
                                     timeInSeconds: e.timeInSeconds || 0,
                                     success: e.success || e.completed || false,
                                     site: e.site || e.location || "Unknown",
-                                    team: e.teamId || teams[e.teamIndex]?.id || "Unknown"
+                                    team: e.teamId || teams[e.teamIndex]?.id || "Unknown",
+                                    matchId: null
                                 };
                                 
                                 matchData.events.push({
                                     ...eventEntry,
                                     map: matchData.maps[mapKey].mapName,
-                                    round: roundNumber,
-                                    matchId: null
+                                    round: roundNumber
                                 });
 
                                 return eventEntry;
@@ -533,27 +539,29 @@
 
                     const matchRef = db.ref(`matches_pro`).push();
                     const matchId = matchRef.key;
+                    const eventsWithIds = matchData.events.map(event => ({
+                        ...event,
+                        matchId
+                    }));
+
                     const saveData = JSON.parse(JSON.stringify({
                         ...matchData,
-                        events: matchData.events.map(event => ({
-                            ...event,
-                            matchId
-                        }))
+                        events: eventsWithIds
                     }));
 
                     console.log('Saving match data:', saveData);
                     
                     try {
                         await matchRef.set(saveData);
-                        console.log('Match saved successfully');
-                        
+                        console.log('Match data saved');
+
                         const updates = {};
-                        saveData.events.forEach((event, index) => {
+                        eventsWithIds.forEach((event, index) => {
                             updates[`events/${matchId}_${index}`] = event;
                         });
-                        
+
                         await db.ref().update(updates);
-                        console.log('Events updated successfully');
+                        console.log('Events saved');
 
                         output.textContent += `\n🎉 Match saved! ID: ${matchId}`;
                         updateEventsDisplay();
