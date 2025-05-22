@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Pwease</title>
+    <title>Match Replay Upload</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -173,23 +173,6 @@
         .toggled .toggle-icon {
             transform: rotate(180deg);
         }
-        .team-selection {
-            margin: 1rem 0;
-            padding: 1rem;
-            background: #2d2d2d;
-            border-radius: 4px;
-        }
-        .team-option {
-            padding: 0.5rem;
-            margin: 0.25rem;
-            cursor: pointer;
-            border-radius: 4px;
-            border: 1px solid #404040;
-        }
-        .team-option.selected {
-            background: #7C3AED;
-            border-color: #7C3AED;
-        }
     </style>
 </head>
 <body>
@@ -217,28 +200,20 @@
             <input type="text" id="opponentInput" class="form-input" required>
         </div>
 
-        <div class="team-selection" id="teamSelection" style="display: none;">
-            <label>Select Your Team:</label>
-            <div id="teamOptions" style="margin-top: 0.5rem;"></div>
-        </div>
-
         <div id="mapInputs">
             <div class="map-upload">
-                <label>Upload Folder for Map 1:</label>
+                <label>Upload Replay Files:</label>
                 <input type="file" class="folder-upload" webkitdirectory directory multiple>
             </div>
         </div>
 
         <div class="form-actions">
-            <button class="btn btn-secondary" onclick="addMapUpload()">➕ Add Map</button>
             <button class="btn btn-success" onclick="submitReplayData()">🚀 Upload Match</button>
             <button class="btn btn-primary" onclick="downloadJSON()">💾 Download JSON</button>
-            <button class="raw-data-toggle" onclick="toggleRawData()">📄 Toggle Raw Data</button>
             <button class="raw-data-toggle" onclick="toggleEvents()">📜 Show Events</button>
         </div>
 
         <div id="outputLog" class="output-log"></div>
-        <div id="rawDataDump" class="raw-data-content"></div>
         <div id="eventsSection" class="raw-data-content">
             <h3 style="color: #7C3AED; margin-bottom: 0.5rem;">Round Events</h3>
             <div id="roundsAccordion" style="color: white;"></div>
@@ -246,20 +221,6 @@
     </div>
 
     <script>
-        const ATTACK_OPS = new Set([
-            'Striker','Sledge','Thatcher','Ash','Thermite','Montagne','Twitch','Blitz','IQ',
-            'Fuze','Glaz','Buck','Blackbeard','Capitao','Hibana','Jackal','Ying','Zofia',
-            'Dokkaebi','Lion','Finka','Maverick','Nomad','Gridlock','Nokk','Amaru','Kali',
-            'Iana','Ace','Zero','Flores','Osa','Sens','Grim','Brava','Ram','Deimos','Rauora'
-        ]);
-
-        const DEFENSE_OPS = new Set([
-            'Sentry','Mute','Smoke','Castle','Pulse','Doc','Rook','Kapkan','Tachanka',
-            'Jäger','Bandit','Frost','Valkyrie','Caveira','Echo','Mira','Lesion','Ela',
-            'Vigil','Maestro','Alibi','Clash','Kaid','Mozzie','Warden','Goyo','Wamai','Oryx',
-            'Melusi','Aruni','Thunderbird','Thorn','Azami','Solis','Fenrir','Tubarao','Skopos'
-        ]);
-
         const firebaseConfig = {
             apiKey: "AIzaSyBRrm0ZrKfhrBWa7A0VghOz82ufJvHeJqI",
             authDomain: "r6stattracker.firebaseapp.com",
@@ -275,37 +236,14 @@
         const auth = firebase.auth();
         const db = firebase.database();
 
-        if (window.location.hostname === "localhost") {
-            console.log("Using Firebase emulators");
-            auth.useEmulator("http://localhost:9099");
-            db.useEmulator("localhost", 9000);
-        }
-
         let teamId = null;
         const go = new Go();
         let wasmReady = false;
-        let rawReplayData = {};
         let matchData = {};
-        let selectedTeamId = null;
-        let availableTeams = [];
-        let processingState = {};
 
         function getRoundNumber(filename) {
             const match = filename.match(/R(\d+)\.rec/i);
             return match ? parseInt(match[1]) : null;
-        }
-
-        function sanitizeFirebaseKey(key) {
-            return key.replace(/[\.#\$\[\]\/]/g, '_');
-        }
-
-        function validateMatchData(data) {
-            return Boolean(
-                data.opponent &&
-                data.teamId &&
-                Object.keys(data.maps).length > 0 &&
-                data.date
-            );
         }
 
         function initializeWASM() {
@@ -313,13 +251,11 @@
                 .then(result => {
                     go.run(result.instance);
                     wasmReady = true;
-                    console.log("WASM module loaded successfully");
+                    console.log("WASM module loaded");
                 })
-                .catch(async error => {
-                    console.error("WASM initialization failed:", error);
-                    showError("Failed to load analysis engine. Retrying...");
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    initializeWASM();
+                .catch(error => {
+                    console.error("WASM init failed:", error);
+                    showError("Analysis engine failed to load");
                 });
         }
         initializeWASM();
@@ -327,36 +263,25 @@
         auth.onAuthStateChanged(async (user) => {
             const loginSection = document.getElementById('login');
             const uploadSection = document.getElementById('replayUploader');
-            const errorMessage = document.getElementById('errorMessage');
-            
-            errorMessage.style.display = 'none';
             
             if (user) {
-                try {
-                    loginSection.style.display = "none";
-                    uploadSection.style.display = "block";
-                    
-                    const teamSnapshot = await db.ref(`users/${user.uid}/teamId`).get();
-                    if (!teamSnapshot.exists()) throw new Error("No team association");
-                    teamId = teamSnapshot.val();
-
-                    const teamNameSnapshot = await db.ref(`teams/${teamId}/info/teamName`).get();
-                    document.getElementById('teamName').textContent = teamNameSnapshot.val();
-                } catch (error) {
-                    showError(`Error: ${error.message}`);
-                    auth.signOut();
-                }
+                loginSection.style.display = "none";
+                uploadSection.style.display = "block";
+                
+                const teamSnapshot = await db.ref(`users/${user.uid}/teamId`).get();
+                teamId = teamSnapshot.exists() ? teamSnapshot.val() : null;
+                
+                const teamName = await db.ref(`teams/${teamId}/info/teamName`).get();
+                document.getElementById('teamName').textContent = teamName.val() || "Unknown Team";
             } else {
                 loginSection.style.display = "block";
                 uploadSection.style.display = "none";
-                teamId = null;
             }
         });
 
         async function login() {
             const email = document.getElementById("email").value;
             const password = document.getElementById("password").value;
-            
             try {
                 await auth.signInWithEmailAndPassword(email, password);
             } catch (error) {
@@ -368,224 +293,72 @@
             auth.signOut();
         }
 
-        let mapCounter = 1;
-        function addMapUpload() {
-            mapCounter++;
-            const container = document.createElement('div');
-            container.className = 'map-upload';
-            container.innerHTML = `
-                <label>Upload Folder for Map ${mapCounter}:</label>
-                <input type="file" class="folder-upload" webkitdirectory directory multiple>
-            `;
-            document.getElementById('mapInputs').appendChild(container);
-        }
-
         async function submitReplayData() {
             const output = document.getElementById('outputLog');
             const opponentInput = document.getElementById('opponentInput');
-            rawReplayData = {};
-            matchData = {};
-            processingState = {};
             
-            const currentOpponent = opponentInput.value.trim();
-            output.textContent = '🚀 Starting upload process...\n';
+            output.textContent = '🚀 Starting upload...\n';
+            matchData = {
+                opponent: opponentInput.value.trim(),
+                teamId,
+                date: new Date().toISOString(),
+                rounds: {}
+            };
 
             try {
-                if (!wasmReady) throw new Error("Analysis engine still loading");
+                if (!wasmReady) throw new Error("Analysis engine not ready");
                 if (!teamId) throw new Error("Not authenticated");
-                if (!currentOpponent) throw new Error("Opponent name required");
 
-                const uploadBlocks = document.querySelectorAll('.map-upload');
-                matchData = {
-                    opponent: currentOpponent,
-                    teamId,
-                    date: new Date().toISOString(),
-                    maps: {}
-                };
+                const input = document.querySelector('.folder-upload');
+                const files = [...input.files].filter(f => f.name.endsWith(".rec"));
 
-                processingState = {
-                    currentMapIndex: 0,
-                    currentFileIndex: 0,
-                    paused: false
-                };
+                for (const file of files) {
+                    output.textContent += `\nProcessing ${file.name}...`;
+                    const roundNumber = getRoundNumber(file.name);
+                    if (!roundNumber) continue;
 
-                for (const [mapIndex, block] of uploadBlocks.entries()) {
-                    const input = block.querySelector('input');
-                    const files = [...input.files]
-                        .filter(f => f.name.endsWith(".rec"))
-                        .sort((a, b) => getRoundNumber(a.name) - getRoundNumber(b.name));
-
-                    if (files.length === 0) continue;
-
-                    const mapKey = `map_${mapIndex}`;
+                    const arrayBuffer = await file.arrayBuffer();
+                    const uint8Array = new Uint8Array(arrayBuffer);
                     
-                    matchData.maps[mapKey] = {
-                        raw: {},
-                        parsed: {},
-                        rounds: {}
+                    const result = await window.dissectReplay(uint8Array);
+                    const parsedData = JSON.parse(result);
+
+                    // Process events
+                    const roundKey = `round_${roundNumber}`;
+                    matchData.rounds[roundKey] = {
+                        duration: parsedData.duration || 0,
+                        events: {}
                     };
 
-                    for (const file of files) {
-                        const roundNumber = getRoundNumber(file.name);
-                        if (!roundNumber) {
-                            output.textContent += `\n⚠️ Invalid filename: ${file.name} - skipping`;
-                            continue;
-                        }
-
-                        try {
-                            output.textContent += `\nProcessing ${file.name}...`;
-                            const arrayBuffer = await file.arrayBuffer();
-                            const uint8Array = new Uint8Array(arrayBuffer);
-                            const safeKey = sanitizeFirebaseKey(file.name);
-                            
-                            const result = await Promise.race([
-                                window.dissectReplay(uint8Array),
-                                new Promise((_, reject) => 
-                                    setTimeout(() => reject(new Error("Processing timeout (5s)")), 5000)
-                                )
-                            ]);
-                            
-                            const parsedData = JSON.parse(result);
-                            console.log("Raw parsedData for", file.name, ":", parsedData);
-
-                            // Store raw data
-                            matchData.maps[mapKey].raw[safeKey] = {
-                                data: arrayBuffer,
-                                originalFilename: file.name
+                    if (parsedData.events) {
+                        parsedData.events.forEach((event, index) => {
+                            matchData.rounds[roundKey].events[`event_${index}`] = {
+                                type: {
+                                    id: event.type?.id || 0,
+                                    name: event.type?.name || "Unknown"
+                                },
+                                headshot: event.headshot || false,
+                                target: event.target || "Unknown",
+                                timeInSeconds: event.timeInSeconds || 0,
+                                username: event.player?.username || "Unknown"
                             };
-
-                            // Process events
-                            const formattedEvents = {};
-                            if (parsedData.events) {
-                                parsedData.events.forEach((event, index) => {
-                                    formattedEvents[`event_${index}`] = {
-                                        type: {
-                                            id: event.type?.id || 0,
-                                            name: event.type?.name || "Unknown"
-                                        },
-                                        headshot: event.headshot || false,
-                                        target: event.target || "Unknown",
-                                        timeInSeconds: event.timeInSeconds || 0,
-                                        username: event.player?.username || "Unknown",
-                                        site: event.site || "Unknown",
-                                        team: event.teamId || "Unknown"
-                                    };
-                                });
-                            }
-
-                            // Store parsed data with Firebase-friendly structure
-                            matchData.maps[mapKey].parsed[safeKey] = {
-                                header: parsedData.header || {},
-                                events: formattedEvents,
-                                duration: parsedData.duration || 0
-                            };
-
-                            // Store round data
-                            matchData.maps[mapKey].rounds[`round_${roundNumber}`] = {
-                                outcome: parsedData.header?.outcome || "Unknown",
-                                site: parsedData.header?.site || "Unknown",
-                                spawn: parsedData.header?.spawnInfo?.name || "Unknown",
-                                duration: parsedData.duration || 0,
-                                events: formattedEvents
-                            };
-
-                            output.textContent += ` ✔️`;
-
-                        } catch (error) {
-                            console.error(`Error processing ${file.name}:`, error);
-                            output.textContent += `\n❌ Error in ${file.name}: ${error.message}`;
-                        }
+                        });
                     }
+
+                    output.textContent += ` ✔️`;
                 }
 
                 const matchRef = db.ref("matches").push();
                 await matchRef.set(matchData);
-                console.log("Firebase upload complete:", matchData);
                 
                 output.textContent += `\n🎉 Match saved! ID: ${matchRef.key}`;
                 updateEventsDisplay();
-                
                 opponentInput.value = '';
-                document.getElementById('mapInputs').innerHTML = `
-                    <div class="map-upload">
-                        <label>Upload Folder for Map 1:</label>
-                        <input type="file" class="folder-upload" webkitdirectory directory multiple>
-                    </div>`;
-                mapCounter = 1;
 
             } catch (error) {
-                console.error("Error:", error);
+                console.error(error);
                 showError(error.message);
                 output.textContent += `\n❌ Error: ${error.message}`;
-                opponentInput.value = currentOpponent;
-            }
-        }
-
-        function showTeamSelection(teams) {
-            const teamOptions = document.getElementById('teamOptions');
-            teamOptions.innerHTML = teams.map(team => `
-                <div class="team-option" 
-                     onclick="selectTeam('${team.id}', '${team.name}')"
-                     data-teamid="${team.id}">
-                    ${team.name} (${team.role})
-                </div>
-            `).join('');
-            document.getElementById('teamSelection').style.display = 'block';
-        }
-
-        function selectTeam(teamId, teamName) {
-            selectedTeamId = teamId;
-            document.querySelectorAll('.team-option').forEach(opt => 
-                opt.classList.remove('selected'));
-            document.querySelector(`[data-teamid="${teamId}"]`).classList.add('selected');
-            document.getElementById('teamSelection').style.display = 'none';
-            processingState.paused = false;
-            submitReplayData();
-        }
-
-        function toggleRawData() {
-            const dumpElement = document.getElementById('rawDataDump');
-            dumpElement.classList.toggle('visible');
-            
-            if (dumpElement.classList.contains('visible')) {
-                let formattedData = "=== Raw Replay Data ===\n\n";
-                Object.values(rawReplayData).forEach(fileData => {
-                    formattedData += `File: ${fileData.fileName}\n`;
-                    if (fileData.error) {
-                        formattedData += `❌ Error: ${fileData.error}\n\n`;
-                        return;
-                    }
-                    formattedData += "Processed Data:\n" + 
-                        JSON.stringify(fileData.processedData, null, 2) + 
-                        "\n\nRaw Data:\n" + 
-                        JSON.stringify(fileData.rawData, null, 2) + 
-                        "\n\n────────────────────\n\n";
-                });
-                dumpElement.textContent = formattedData;
-            }
-        }
-
-        function downloadJSON() {
-            try {
-                if (!matchData || Object.keys(matchData).length === 0) {
-                    throw new Error("No match data available to download");
-                }
-                
-                const filename = `match_${matchData.opponent}_${new Date().toISOString().slice(0,10)}.json`;
-                const jsonStr = JSON.stringify(matchData, null, 2);
-                const blob = new Blob([jsonStr], { type: "application/json" });
-                const url = URL.createObjectURL(blob);
-                
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                
-            } catch (error) {
-                showError(`Download failed: ${error.message}`);
             }
         }
 
@@ -593,68 +366,68 @@
             const accordion = document.getElementById('roundsAccordion');
             accordion.innerHTML = '';
 
-            Object.entries(matchData.maps).forEach(([mapKey, mapData]) => {
-                Object.entries(mapData.rounds).forEach(([roundKey, roundData]) => {
-                    const roundNumber = roundKey.split('_')[1];
-                    const roundDiv = document.createElement('div');
-                    roundDiv.className = 'round-event';
-                    roundDiv.innerHTML = `
-                        <div class="round-header" onclick="toggleRound(this)">
-                            <span>Map: ${mapData.parsed[Object.keys(mapData.parsed)[0]]?.header?.map?.name || 'Unknown'} - Round ${roundNumber}</span>
-                            <span class="toggle-icon">▼</span>
-                        </div>
-                        <div class="round-events">
-                            ${Object.entries(roundData.events).map(([eventKey, event]) => {
-                                const mins = Math.floor(event.timeInSeconds / 60);
-                                const secs = event.timeInSeconds % 60;
-                                const time = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-                                
-                                const teamRole = availableTeams.find(t => t.id === selectedTeamId)?.role?.toLowerCase();
-                                const teamContext = event.team === selectedTeamId 
-                                    ? `(${teamRole === 'attack' ? 'Attacking' : 'Defending'} Team)` 
-                                    : `(${teamRole === 'attack' ? 'Defending' : 'Attacking'} Team)`;
+            if (!matchData.rounds) return;
 
-                                let details = '';
-                                switch(event.type.name.toLowerCase()) {
-                                    case 'kill':
-                                        details = `${event.username} ${teamContext} killed ${event.target} at ${event.site}${event.headshot ? ' (Headshot)' : ''}`;
-                                        break;
-                                    case 'plant':
-                                    case 'defuse':
-                                        const verb = event.type.name.toLowerCase();
-                                        const status = event.success ? 'successful' : 'failed';
-                                        details = `${event.username} ${teamContext} ${verb} ${status} at ${event.site}`;
-                                        break;
-                                    default:
-                                        details = `${event.username} ${teamContext} ${event.type.name}`;
-                                }
-                                
-                                return `<div class="event-item event-${event.type.name.toLowerCase()}">[${time}] ${details}</div>`;
-                            }).join('')}
-                        </div>
-                    `;
-                    accordion.appendChild(roundDiv);
-                });
+            Object.entries(matchData.rounds).forEach(([roundKey, roundData]) => {
+                const roundNumber = roundKey.split('_')[1];
+                const roundDiv = document.createElement('div');
+                roundDiv.className = 'round-event';
+                
+                roundDiv.innerHTML = `
+                    <div class="round-header" onclick="toggleRound(this)">
+                        <span>Round ${roundNumber}</span>
+                        <span class="toggle-icon">▼</span>
+                    </div>
+                    <div class="round-events">
+                        ${Object.values(roundData.events).map(event => {
+                            const mins = Math.floor(event.timeInSeconds / 60);
+                            const secs = event.timeInSeconds % 60;
+                            const time = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                            
+                            return `
+                                <div class="event-item event-${event.type.name.toLowerCase()}">
+                                    [${time}] ${event.username}
+                                    ${event.type.name} 
+                                    ${event.target ? `→ ${event.target}` : ''}
+                                    ${event.headshot ? '(HS)' : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                `;
+                accordion.appendChild(roundDiv);
             });
         }
 
         function toggleRound(header) {
-            const roundDiv = header.parentElement;
-            const content = roundDiv.querySelector('.round-events');
+            const content = header.parentElement.querySelector('.round-events');
             content.classList.toggle('visible');
-            roundDiv.classList.toggle('toggled');
+            header.parentElement.classList.toggle('toggled');
         }
 
         function toggleEvents() {
-            const eventsSection = document.getElementById('eventsSection');
-            eventsSection.classList.toggle('visible');
+            document.getElementById('eventsSection').classList.toggle('visible');
+        }
+
+        function downloadJSON() {
+            try {
+                const blob = new Blob([JSON.stringify(matchData, null, 2)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `match_${new Date().toISOString()}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                showError("Download failed: " + error.message);
+            }
         }
 
         function showError(message) {
-            const errorMessage = document.getElementById('errorMessage');
-            errorMessage.textContent = message;
-            errorMessage.style.display = 'block';
-            setTimeout(() => errorMessage.style.display = 'none', 10000);
+            const errorElement = document.getElementById('errorMessage');
+            errorElement.textContent = message;
+            errorElement.style.display = 'block';
+            setTimeout(() => errorElement.style.display = 'none', 10000);
         }
     </script>
 </body>
