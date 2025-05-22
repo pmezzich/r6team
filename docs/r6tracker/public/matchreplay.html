@@ -295,6 +295,10 @@
             return match ? parseInt(match[1]) : null;
         }
 
+        function sanitizeFirebaseKey(key) {
+            return key.replace(/[\.#\$\[\]\/]/g, '_');
+        }
+
         function validateMatchData(data) {
             return Boolean(
                 data.opponent &&
@@ -415,7 +419,6 @@
 
                     const mapKey = `map_${mapIndex}`;
                     
-                    // CRITICAL: Store complete data structure
                     matchData.maps[mapKey] = {
                         raw: {},
                         parsed: {},
@@ -433,8 +436,8 @@
                             output.textContent += `\nProcessing ${file.name}...`;
                             const arrayBuffer = await file.arrayBuffer();
                             const uint8Array = new Uint8Array(arrayBuffer);
+                            const safeKey = sanitizeFirebaseKey(file.name);
                             
-                            // DIRECT WASM PROCESSING
                             const result = await Promise.race([
                                 window.dissectReplay(uint8Array),
                                 new Promise((_, reject) => 
@@ -445,11 +448,15 @@
                             const parsedData = JSON.parse(result);
                             console.log("Raw parsedData for", file.name, ":", parsedData);
 
-                            // PRESERVE ALL DATA
-                            matchData.maps[mapKey].raw[file.name] = arrayBuffer;
-                            matchData.maps[mapKey].parsed[file.name] = parsedData;
+                            matchData.maps[mapKey].raw[safeKey] = {
+                                data: arrayBuffer,
+                                originalFilename: file.name
+                            };
+                            matchData.maps[mapKey].parsed[safeKey] = {
+                                ...parsedData,
+                                originalFilename: file.name
+                            };
                             
-                            // AGGREGATE EVENTS
                             if (parsedData.events) {
                                 matchData.maps[mapKey].events.push(...parsedData.events.map(e => ({
                                     ...e,
@@ -467,7 +474,6 @@
                     }
                 }
 
-                // FIREBASE UPLOAD
                 const matchRef = db.ref("matches").push();
                 await matchRef.set(matchData);
                 console.log("Firebase upload complete:", matchData);
