@@ -1,264 +1,37 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script>
-        window.process = window.process || { env: {} };
-    </script>
-    <title>Upload refw</title>
-    <link rel="stylesheet" href="../styles/styles.css">
-    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
-    <script src="../public/wasm_exec.js"></script>
+    <title>R6 Match Replay Uploader</title>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <script src="https://unpkg.com/browserfs"></script>
     <style>
-        .output-log {
-            padding: 1rem;
-            margin: 1rem 0;
-            background: #1a1a1a;
-            border-radius: 4px;
-            white-space: pre-wrap;
-            color: white;
-            max-height: 400px;
-            overflow-y: auto;
-        }
-        
-        .error-message {
-            padding: 15px;
-            margin: 20px;
-            background: #ffebee;
-            color: #b71c1c;
-            border-radius: 4px;
-            border: 1px solid #ffcdd2;
-            display: none;
-        }
-
-        .folder-upload {
-            margin: 1rem 0;
-            display: block;
-        }
-
-        .form-input {
-            margin: 0.5rem 0;
-            padding: 0.75rem;
-            width: 100%;
-            background: #2d2d2d;
-            border: 1px solid #404040;
-            color: white;
-            border-radius: 4px;
-        }
-
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        .nav-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 2rem;
-            flex-wrap: wrap;
-            gap: 1rem;
-        }
-
-        .auth-actions {
-            display: flex;
-            gap: 1rem;
-            align-items: center;
-        }
-
-        .btn {
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
-            cursor: pointer;
-            border: none;
-            font-weight: 500;
-        }
-
-        .btn-primary {
-            background: #7C3AED;
-            color: white;
-        }
-
-        .btn-secondary {
-            background: #404040;
-            color: white;
-        }
-
-        .btn-success {
-            background: #10B981;
-            color: white;
-        }
-
-        .btn-danger {
-            background: #EF4444;
-            color: white;
-        }
-
-        .map-upload {
-            margin-bottom: 2rem;
-            padding: 1rem;
-            background: #2d2d2d;
-            border-radius: 4px;
-        }
-
-        .form-actions {
-            margin-top: 1rem;
-            display: flex;
-            gap: 1rem;
-            flex-wrap: wrap;
-        }
-
-        .raw-data-toggle {
-            margin: 1rem 0;
-            background: #333;
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
-            cursor: pointer;
-            display: inline-block;
-        }
-
-        .raw-data-content {
-            display: none;
-            background: #1a1a1a;
-            padding: 1rem;
-            margin: 1rem 0;
-            border-radius: 4px;
-            white-space: pre-wrap;
-            max-height: 500px;
-            overflow-y: auto;
-        }
-
-        .raw-data-content.visible {
-            display: block;
-        }
-
-        .event-item {
-            padding: 0.5rem;
-            margin: 0.25rem 0;
-            background: #2d2d2d;
-            border-radius: 4px;
-            font-family: monospace;
-        }
-        .event-kill { border-left: 4px solid #EF4444; }
-        .event-plant { border-left: 4px solid #10B981; }
-        .event-defuse { border-left: 4px solid #3B82F6; }
-        .round-event {
-            margin-bottom: 1rem;
-            background: #2d2d2d;
-            border-radius: 4px;
-        }
-        .round-header {
-            padding: 0.75rem;
-            display: flex;
-            justify-content: space-between;
-            cursor: pointer;
-            background: #3d3d3d;
-            border-radius: 4px 4px 0 0;
-        }
-        .round-events {
-            display: none;
-            padding: 0.5rem;
-        }
-        .round-events.visible {
-            display: block;
-        }
-        .toggle-icon {
-            margin-left: 1rem;
-            transition: transform 0.2s;
-        }
-        .toggled .toggle-icon {
-            transform: rotate(180deg);
-        }
-        .team-selection {
-            margin: 1rem 0;
-            padding: 1rem;
-            background: #2d2d2d;
-            border-radius: 4px;
-        }
-        .team-option {
-            padding: 0.5rem;
-            margin: 0.25rem;
-            cursor: pointer;
-            border-radius: 4px;
-            border: 1px solid #404040;
-        }
-        .team-option.selected {
-            background: #7C3AED;
-            border-color: #7C3AED;
-        }
+        body { font-family: Arial, sans-serif; background-color: #111; color: #eee; padding: 20px; }
+        input, button { margin: 10px 0; }
+        #mapContainer { margin-top: 20px; }
+        .map-block { border: 1px solid #666; padding: 10px; margin-bottom: 10px; }
     </style>
 </head>
 <body>
-    <div id="errorMessage" class="error-message"></div>
+    <h2>Upload R6 Replay</h2>
 
-    <div class="container" id="login" style="display: none;">
-        <h1>Team Login</h1>
-        <input type="email" id="email" placeholder="Email" class="form-input"><br>
-        <input type="password" id="password" placeholder="Password" class="form-input"><br>
-        <button class="btn btn-primary" onclick="login()">Login</button>
-    </div>
+    <label>Team ID: <input type="text" id="teamId" placeholder="e.g. soulz" /></label><br>
+    <label>Opponent: <input type="text" id="opponent" placeholder="e.g. SHSU" /></label><br>
 
-    <div class="container" id="replayUploader" style="display: none;">
-        <div class="nav-header">
-            <h1>📂 Upload Match Replay</h1>
-            <div class="auth-actions">
-                <a href="index.html" class="btn btn-secondary">🏠 Home</a>
-                <span id="teamName" style="color: #7C3AED; font-weight: 500;"></span>
-                <button class="btn btn-danger" onclick="logout()">Logout</button>
-            </div>
-        </div>
-
-        <div class="form-group">
-            <label>Opponent Team Name:</label>
-            <input type="text" id="opponentInput" class="form-input" required>
-        </div>
-
-        <div class="team-selection" id="teamSelection" style="display: none;">
-            <label>Select Your Team:</label>
-            <div id="teamOptions" style="margin-top: 0.5rem;"></div>
-        </div>
-
-        <div id="mapInputs">
-            <div class="map-upload">
-                <label>Upload Folder for Map 1:</label>
-                <input type="file" class="folder-upload" webkitdirectory directory multiple>
-            </div>
-        </div>
-
-        <div class="form-actions">
-            <button class="btn btn-secondary" onclick="addMapUpload()">➕ Add Map</button>
-            <button class="btn btn-success" onclick="submitReplayData()">🚀 Upload Match</button>
-            <button class="btn btn-primary" onclick="downloadJSON()">💾 Download JSON</button>
-            <button class="raw-data-toggle" onclick="toggleRawData()">📄 Toggle Raw Data</button>
-            <button class="raw-data-toggle" onclick="toggleEvents()">📜 Show Events</button>
-        </div>
-
-        <div id="outputLog" class="output-log"></div>
-        <div id="rawDataDump" class="raw-data-content"></div>
-        <div id="eventsSection" class="raw-data-content">
-            <h3 style="color: #7C3AED; margin-bottom: 0.5rem;">Round Events</h3>
-            <div id="roundsAccordion" style="color: white;"></div>
+    <div id="mapContainer">
+        <div class="map-block">
+            <label>Replay Folder: <input type="file" class="replay-folder" webkitdirectory directory multiple /></label>
         </div>
     </div>
 
-    <script>
-        const ATTACK_OPS = new Set([
-            'Striker','Sledge','Thatcher','Ash','Thermite','Montagne','Twitch','Blitz','IQ',
-            'Fuze','Glaz','Buck','Blackbeard','Capitao','Hibana','Jackal','Ying','Zofia',
-            'Dokkaebi','Lion','Finka','Maverick','Nomad','Gridlock','Nokk','Amaru','Kali',
-            'Iana','Ace','Zero','Flores','Osa','Sens','Grim','Brava','Ram','Deimos','Rauora'
-        ]);
+    <button onclick="addReplay()">Add Another Map</button>
+    <button onclick="upload()">Upload to Firebase</button>
 
-        const DEFENSE_OPS = new Set([
-            'Sentry','Mute','Smoke','Castle','Pulse','Doc','Rook','Kapkan','Tachanka',
-            'Jäger','Bandit','Frost','Valkyrie','Caveira','Echo','Mira','Lesion','Ela',
-            'Vigil','Maestro','Alibi','Clash','Kaid','Mozzie','Warden','Goyo','Wamai','Oryx',
-            'Melusi','Aruni','Thunderbird','Thorn','Azami','Solis','Fenrir','Tubarao','Skopos'
-        ]);
+    <pre id="output" style="margin-top:20px; white-space:pre-wrap;"></pre>
+
+    <script type="module">
+        import init, { parse_replay } from "./r6-dissect.wasm";
 
         const firebaseConfig = {
             apiKey: "AIzaSyBRrm0ZrKfhrBWa7A0VghOz82ufJvHeJqI",
@@ -271,473 +44,75 @@
             measurementId: "G-TN7LJDJP3R"
         };
 
-        const app = firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
+        firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
 
-        if (window.location.hostname === "localhost") {
-            console.log("Using Firebase emulators");
-            auth.useEmulator("http://localhost:9099");
-            db.useEmulator("localhost", 9000);
-        }
+        async function upload() {
+            const teamId = document.getElementById('teamId').value.trim();
+            const opponent = document.getElementById('opponent').value.trim();
+            if (!teamId || !opponent) return alert("Please enter team ID and opponent.");
 
-        let teamId = null;
-        const go = new Go();
-        let wasmReady = false;
-        let rawReplayData = {};
-        let matchData = {};
-        let selectedTeamId = null;
-        let availableTeams = [];
-        let processingState = {};
+            await init(); // wait for WASM
 
-        function getRoundNumber(filename) {
-            const match = filename.match(/R(\d+)\.rec/i);
-            return match ? parseInt(match[1]) : null;
-        }
+            let allParsedMaps = {};
+            const folderBlocks = document.querySelectorAll('.replay-folder');
+            for (let i = 0; i < folderBlocks.length; i++) {
+                const files = folderBlocks[i].files;
+                if (!files.length) continue;
 
-        function validateMatchData(data) {
-            return Boolean(
-                data.opponent &&
-                data.teamId &&
-                Object.keys(data.maps).length > 0 &&
-                data.date
-            );
-        }
-
-        function initializeWASM() {
-            WebAssembly.instantiateStreaming(fetch("../public/r6-dissect.wasm"), go.importObject)
-                .then(result => {
-                    go.run(result.instance);
-                    wasmReady = true;
-                    console.log("WASM module loaded successfully");
-                })
-                .catch(async error => {
-                    console.error("WASM initialization failed:", error);
-                    showError("Failed to load analysis engine. Retrying...");
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    initializeWASM();
-                });
-        }
-        initializeWASM();
-
-        auth.onAuthStateChanged(async (user) => {
-            const loginSection = document.getElementById('login');
-            const uploadSection = document.getElementById('replayUploader');
-            const errorMessage = document.getElementById('errorMessage');
-            
-            errorMessage.style.display = 'none';
-            
-            if (user) {
-                try {
-                    loginSection.style.display = "none";
-                    uploadSection.style.display = "block";
-                    
-                    const teamSnapshot = await db.ref(`users/${user.uid}/teamId`).get();
-                    if (!teamSnapshot.exists()) throw new Error("No team association");
-                    teamId = teamSnapshot.val();
-
-                    const teamNameSnapshot = await db.ref(`teams/${teamId}/info/teamName`).get();
-                    document.getElementById('teamName').textContent = teamNameSnapshot.val();
-                } catch (error) {
-                    showError(`Error: ${error.message}`);
-                    auth.signOut();
+                const bfsData = {};
+                for (let file of files) {
+                    bfsData[file.webkitRelativePath] = new Uint8Array(await file.arrayBuffer());
                 }
-            } else {
-                loginSection.style.display = "block";
-                uploadSection.style.display = "none";
-                teamId = null;
-            }
-        });
 
-        async function login() {
-            const email = document.getElementById("email").value;
-            const password = document.getElementById("password").value;
-            
-            try {
-                await auth.signInWithEmailAndPassword(email, password);
-            } catch (error) {
-                showError(`Login failed: ${error.message}`);
-            }
-        }
-
-        function logout() {
-            auth.signOut();
-        }
-
-        let mapCounter = 1;
-        function addMapUpload() {
-            mapCounter++;
-            const container = document.createElement('div');
-            container.className = 'map-upload';
-            container.innerHTML = `
-                <label>Upload Folder for Map ${mapCounter}:</label>
-                <input type="file" class="folder-upload" webkitdirectory directory multiple>
-            `;
-            document.getElementById('mapInputs').appendChild(container);
-        }
-
-        async function submitReplayData() {
-            const output = document.getElementById('outputLog');
-            const opponentInput = document.getElementById('opponentInput');
-            rawReplayData = {};
-            matchData = {};
-            processingState = {};
-            
-            const currentOpponent = opponentInput.value.trim();
-            output.textContent = '🚀 Starting upload process...\n';
-
-            try {
-                if (!wasmReady) throw new Error("Analysis engine still loading");
-                if (!teamId) throw new Error("Not authenticated");
-                if (!currentOpponent) throw new Error("Opponent name required");
-
-                const uploadBlocks = document.querySelectorAll('.map-upload');
-                matchData = {
-                    opponent: currentOpponent,
-                    teamId,
-                    date: new Date().toISOString(),
-                    maps: {},
-                    events: []
-                };
-
-                processingState = {
-                    currentMapIndex: 0,
-                    currentFileIndex: 0,
-                    paused: false
-                };
-
-                for (const [mapIndex, block] of uploadBlocks.entries()) {
-                    const input = block.querySelector('input');
-                    let files = [...input.files].filter(f => f.name.endsWith(".rec"));
-                    
-                    files = files.sort((a, b) => {
-                        const aRound = getRoundNumber(a.name);
-                        const bRound = getRoundNumber(b.name);
-                        return aRound - bRound;
+                await new Promise((resolve, reject) => {
+                    BrowserFS.configure({ fs: "InMemory", options: {} }, function(err) {
+                        if (err) return reject(err);
+                        const fs = BrowserFS.BFSRequire("fs");
+                        for (const path in bfsData) {
+                            const dirs = path.split("/");
+                            dirs.pop();
+                            let dirPath = "";
+                            for (const d of dirs) {
+                                dirPath += "/" + d;
+                                if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath);
+                            }
+                            fs.writeFileSync("/" + path, bfsData[path]);
+                        }
+                        resolve();
                     });
-
-                    if (files.length === 0) continue;
-
-                    const mapKey = `map_${mapIndex}`;
-                    
-                    matchData.maps[mapKey] = {
-                        mapName: "Unknown",
-                        folderName: files[0]?.webkitRelativePath?.split("/")[0] || `Map_${mapIndex+1}`,
-                        rounds: {},
-                        teamScore: 0,
-                        opponentScore: 0,
-                        userTeamId: "Unknown",
-                        opponentTeamId: "Unknown"
-                    };
-
-                    for (const [fileIndex, file] of files.entries()) {
-                        if (processingState.paused) break;
-                        
-                        const roundNumber = getRoundNumber(file.name);
-                        if (!roundNumber) {
-                            output.textContent += `\n⚠️ Invalid filename: ${file.name} - skipping`;
-                            continue;
-                        }
-
-                        try {
-                            output.textContent += `\nProcessing ${file.name}...`;
-                            const arrayBuffer = await file.arrayBuffer();
-                            const uint8Array = new Uint8Array(arrayBuffer);
-                            
-                            const result = await Promise.race([
-                                window.dissectReplay(uint8Array),
-                                new Promise((_, reject) => 
-                                    setTimeout(() => reject(new Error("Processing timeout (5s)")), 5000)
-                                )
-                            ]);
-                            
-                            const data = JSON.parse(result);
-                            const teams = data.header?.teams || [];
-
-                            rawReplayData[file.name] = {
-                                fileName: file.name,
-                                processedData: data,
-                                rawData: result
-                            };
-
-                            if (matchData.maps[mapKey].mapName === "Unknown") {
-                                matchData.maps[mapKey].mapName = 
-                                    data.header?.map?.name?.replace(/([a-z])([A-Z])/g, '$1 $2') || 
-                                    "Unknown";
-                            }
-
-                            if (teams.length >= 2 && availableTeams.length === 0) {
-                                availableTeams = teams.map(t => ({
-                                    id: t.id,
-                                    name: t.name,
-                                    role: t.players?.some(p => p.operator && ATTACK_OPS.has(p.operator.name)) 
-                                        ? 'attack' 
-                                        : 'defense'
-                                }));
-                                showTeamSelection(availableTeams);
-                                processingState = {
-                                    currentMapIndex: mapIndex,
-                                    currentFileIndex: fileIndex,
-                                    paused: true
-                                };
-                                output.textContent += '\n⏳ Please select your team to continue';
-                                return;
-                            }
-
-                            const outcome = data.header?.outcome?.toLowerCase() || '';
-                            const teamRole = availableTeams.find(t => t.id === selectedTeamId)?.role?.toLowerCase() || 'attack';
-                            
-                            // Score calculation logic
-                            if (outcome.includes('attack')) {
-                                teamRole === 'attack'
-                                    ? matchData.maps[mapKey].teamScore++
-                                    : matchData.maps[mapKey].opponentScore++;
-                            }
-                            else if (outcome.includes('defense')) {
-                                teamRole === 'defense'
-                                    ? matchData.maps[mapKey].teamScore++
-                                    : matchData.maps[mapKey].opponentScore++;
-                            }
-                            else {
-                                const attackers = (data.header?.players || []).filter(p => 
-                                    p.operator && ATTACK_OPS.has(p.operator.name)
-                                ).length;
-                                
-                                attackers > 0 
-                                    ? matchData.maps[mapKey].teamScore++
-                                    : matchData.maps[mapKey].opponentScore++;
-                            }
-
-                            const roundEvents = (data.events || []).map(e => {
-                                const eventType = e.type?.toLowerCase() || 'unknown';
-                                const eventEntry = {
-                                    type: eventType,
-                                    player: e.player?.username || "Unknown",
-                                    target: e.target || null,
-                                    headshot: e.headshot || false,
-                                    timeInSeconds: e.timeInSeconds || 0,
-                                    success: e.success || e.completed || false,
-                                    site: e.site || e.location || "Unknown",
-                                    team: e.teamId || teams[e.teamIndex]?.id || "Unknown",
-                                    matchId: null
-                                };
-                                
-                                matchData.events.push({
-                                    ...eventEntry,
-                                    map: matchData.maps[mapKey].mapName,
-                                    round: roundNumber
-                                });
-
-                                return eventEntry;
-                            });
-
-                            matchData.maps[mapKey].rounds[roundNumber] = {
-                                site: data.header?.site || "Unknown",
-                                spawn: data.header?.spawnInfo?.name || "Unknown",
-                                outcome: outcome || "unknown",
-                                players: (data.header?.players || []).map(player => ({
-                                    name: player.username || "Unknown",
-                                    operator: player.operator?.name || "Unknown",
-                                    team: data.header?.teams?.[player.teamIndex]?.name || "Unknown"
-                                })),
-                                events: roundEvents,
-                                duration: data.header?.matchDuration || 0,
-                                timestamp: new Date(data.header?.timestamp || Date.now()).toISOString()
-                            };
-
-                            output.textContent += ` ✔️`;
-
-                        } catch (error) {
-                            console.error(`Error processing ${file.name}:`, error);
-                            output.textContent += `\n❌ Error in ${file.name}: ${error.message}`;
-                        }
-                    }
-                }
-
-                if (!processingState.paused) {
-                    if (!validateMatchData(matchData)) {
-                        throw new Error("Invalid match data structure");
-                    }
-
-                    const matchRef = db.ref(`matches_pro`).push();
-                    const matchId = matchRef.key;
-                    const eventsWithIds = matchData.events.map(event => ({
-                        ...event,
-                        matchId
-                    }));
-
-                    const saveData = JSON.parse(JSON.stringify({
-                        ...matchData,
-                        events: eventsWithIds
-                    }));
-                    
-                    try {
-                        await matchRef.set(saveData);
-                        await db.ref().update(
-                            eventsWithIds.reduce((updates, event, index) => {
-                                updates[`events/${matchId}_${index}`] = event;
-                                return updates;
-                            }, {})
-                        );
-
-                        output.textContent += `\n🎉 Match saved! ID: ${matchId}`;
-                        updateEventsDisplay();
-                        
-                        opponentInput.value = '';
-                        document.getElementById('mapInputs').innerHTML = `
-                            <div class="map-upload">
-                                <label>Upload Folder for Map 1:</label>
-                                <input type="file" class="folder-upload" webkitdirectory directory multiple>
-                            </div>`;
-                        mapCounter = 1;
-                    } catch (firebaseError) {
-                        console.error('Firebase save error:', firebaseError);
-                        showError(`Save failed: ${firebaseError.message}`);
-                        output.textContent += `\n❌ Failed to save match: ${firebaseError.message}`;
-                    }
-                }
-
-            } catch (error) {
-                console.error("Error:", error);
-                showError(error.message);
-                output.textContent += `\n❌ Error: ${error.message}`;
-                opponentInput.value = currentOpponent;
-            }
-        }
-
-        function showTeamSelection(teams) {
-            const teamOptions = document.getElementById('teamOptions');
-            teamOptions.innerHTML = teams.map(team => `
-                <div class="team-option" 
-                     onclick="selectTeam('${team.id}', '${team.name}')"
-                     data-teamid="${team.id}">
-                    ${team.name} (${team.role})
-                </div>
-            `).join('');
-            document.getElementById('teamSelection').style.display = 'block';
-        }
-
-        function selectTeam(teamId, teamName) {
-            selectedTeamId = teamId;
-            document.querySelectorAll('.team-option').forEach(opt => 
-                opt.classList.remove('selected'));
-            document.querySelector(`[data-teamid="${teamId}"]`).classList.add('selected');
-            document.getElementById('teamSelection').style.display = 'none';
-            processingState.paused = false;
-            submitReplayData();
-        }
-
-        function toggleRawData() {
-            const dumpElement = document.getElementById('rawDataDump');
-            dumpElement.classList.toggle('visible');
-            
-            if (dumpElement.classList.contains('visible')) {
-                let formattedData = "=== Raw Replay Data ===\n\n";
-                Object.values(rawReplayData).forEach(fileData => {
-                    formattedData += `File: ${fileData.fileName}\n`;
-                    if (fileData.error) {
-                        formattedData += `❌ Error: ${fileData.error}\n\n`;
-                        return;
-                    }
-                    formattedData += "Processed Data:\n" + 
-                        JSON.stringify(fileData.processedData, null, 2) + 
-                        "\n\nRaw Data:\n" + 
-                        JSON.stringify(fileData.rawData, null, 2) + 
-                        "\n\n────────────────────\n\n";
                 });
-                dumpElement.textContent = formattedData;
+
+                const mapResult = parse_replay();
+                const folderName = files[0].webkitRelativePath.split("/")[0];
+                allParsedMaps[`map_${i}`] = {
+                    ...mapResult,
+                    folderName
+                };
             }
+
+            const matchData = {
+                teamId,
+                opponent,
+                date: new Date().toISOString(),
+                maps: allParsedMaps,
+                events: []
+            };
+
+            const matchId = `match_${opponent}_${new Date().toISOString().split("T")[0]}`;
+            document.getElementById('output').textContent = JSON.stringify(matchData, null, 2);
+
+            await db.ref("/matches/" + matchId).set(matchData);
+            alert("Upload complete!");
         }
 
-        function downloadJSON() {
-            try {
-                if (!matchData || Object.keys(matchData).length === 0) {
-                    throw new Error("No match data available to download");
-                }
-                
-                const filename = `match_${matchData.opponent}_${new Date().toISOString().slice(0,10)}.json`;
-                const jsonStr = JSON.stringify(matchData, null, 2);
-                const blob = new Blob([jsonStr], { type: "application/json" });
-                const url = URL.createObjectURL(blob);
-                
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                
-            } catch (error) {
-                showError(`Download failed: ${error.message}`);
-            }
-        }
-
-        function updateEventsDisplay() {
-            const accordion = document.getElementById('roundsAccordion');
-            accordion.innerHTML = '';
-            
-            Object.entries(matchData.maps).forEach(([mapKey, mapData]) => {
-                Object.entries(mapData.rounds).forEach(([roundNumber, roundData]) => {
-                    const roundDiv = document.createElement('div');
-                    roundDiv.className = 'round-event';
-                    roundDiv.innerHTML = `
-                        <div class="round-header" onclick="toggleRound(this)">
-                            <span>Map: ${mapData.mapName} - Round ${roundNumber}</span>
-                            <span class="toggle-icon">▼</span>
-                        </div>
-                        <div class="round-events">
-                            ${roundData.events.map(event => {
-                                const mins = Math.floor(event.timeInSeconds / 60);
-                                const secs = event.timeInSeconds % 60;
-                                const time = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-                                
-                                const teamRole = availableTeams.find(t => t.id === selectedTeamId)?.role?.toLowerCase();
-                                const teamContext = event.team === selectedTeamId 
-                                    ? `(${teamRole === 'attack' ? 'Attacking' : 'Defending'} Team)` 
-                                    : `(${teamRole === 'attack' ? 'Defending' : 'Attacking'} Team)`;
-
-                                let details = '';
-                                switch(event.type) {
-                                    case 'kill':
-                                        details = `${event.player} ${teamContext} killed ${event.target || 'unknown'} at ${event.site}${event.headshot ? ' (Headshot)' : ''}`;
-                                        break;
-                                    case 'plant':
-                                    case 'defuse':
-                                        const verb = event.type === 'plant' ? 'plant' : 'defuse';
-                                        const status = event.success ? 'successful' : 'failed';
-                                        details = `${event.player} ${teamContext} ${verb} ${status} at ${event.site}`;
-                                        break;
-                                    default:
-                                        details = `${event.player} ${teamContext} ${event.type}`;
-                                }
-                                
-                                return `<div class="event-item event-${event.type}">[${time}] ${details}</div>`;
-                            }).join('')}
-                        </div>
-                    `;
-                    accordion.appendChild(roundDiv);
-                });
-            });
-        }
-
-        function toggleRound(header) {
-            const roundDiv = header.parentElement;
-            const content = roundDiv.querySelector('.round-events');
-            content.classList.toggle('visible');
-            roundDiv.classList.toggle('toggled');
-        }
-
-        function toggleEvents() {
-            const eventsSection = document.getElementById('eventsSection');
-            eventsSection.classList.toggle('visible');
-        }
-
-        function showError(message) {
-            const errorMessage = document.getElementById('errorMessage');
-            errorMessage.textContent = message;
-            errorMessage.style.display = 'block';
-            setTimeout(() => errorMessage.style.display = 'none', 10000);
+        function addReplay() {
+            const div = document.createElement('div');
+            div.className = "map-block";
+            div.innerHTML = `
+                <label>Replay Folder: <input type="file" class="replay-folder" webkitdirectory directory multiple /></label>
+            `;
+            document.getElementById('mapContainer').appendChild(div);
         }
     </script>
 </body>
