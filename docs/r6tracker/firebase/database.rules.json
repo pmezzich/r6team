@@ -6,23 +6,53 @@
         ".write": "
           auth.uid == $userId ||
           (
-            root.child('users').child(auth.uid).child('role').val() == 'captain' &&
-            root.child('users').child(auth.uid).child('teamId').val() == 
-            root.child('users').child($userId).child('teamId').val()
+            root.child('teams').child(root.child('users').child(auth.uid).child('teamId').val())
+              .child('players').child(auth.uid).child('role').val() == 'captain' &&
+            root.child('users').child($userId).child('teamId').val() == 
+              root.child('users').child(auth.uid).child('teamId').val()
           )
-        "
+        ",
+        "teamId": {
+          ".validate": "
+            newData.val() == null || 
+            root.child('teams').child(newData.val()).exists()
+          "
+        }
       }
     },
     "teams": {
       "$teamId": {
+        ".read": "
+          auth != null &&
+          root.child('users').child(auth.uid).child('teamId').val() == $teamId
+        ",
+        ".write": "
+          root.child('teams').child($teamId).child('players').child(auth.uid).child('role').val() == 'captain'
+        ",
         "players": {
           "$playerId": {
+            ".validate": "
+              newData.hasChildren(['displayName', 'username', 'role']) &&
+              newData.child('role').val().matches(/^(captain|member)$/)
+            "
+          }
+        },
+        "matches": {
+          ".indexOn": ["timestamp", "opponent"]
+        },
+        "members": {
+          "$memberId": {
             ".write": "
-              root.child('users').child(auth.uid).child('role').val() == 'captain' &&
-              root.child('users').child(auth.uid).child('teamId').val() == $teamId
+              root.child('teams').child($teamId).child('players').child(auth.uid).child('role').val() == 'captain'
             "
           }
         }
+      }
+    },
+    "team_registry": {
+      "$teamId": {
+        ".read": "auth != null",
+        ".write": "auth != null && !data.exists()"
       }
     }
   }
