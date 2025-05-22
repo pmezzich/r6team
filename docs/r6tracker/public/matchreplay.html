@@ -232,6 +232,7 @@
         <div class="form-actions">
             <button class="btn btn-secondary" onclick="addMapUpload()">➕ Add Map</button>
             <button class="btn btn-success" onclick="submitReplayData()">🚀 Upload Match</button>
+            <button class="btn btn-primary" onclick="downloadJSON()">💾 Download JSON</button>
             <button class="raw-data-toggle" onclick="toggleRawData()">📄 Toggle Raw Data</button>
             <button class="raw-data-toggle" onclick="toggleEvents()">📜 Show Events</button>
         </div>
@@ -645,6 +646,30 @@
                         "\n\n────────────────────\n\n";
                 });
                 dumpElement.textContent = formattedData;
+            }
+        }
+
+        function downloadJSON() {
+            try {
+                if (!matchData || Object.keys(matchData).length === 0) {
+                    throw new Error("No match data available to download");
+                }
+                
+                const filename = `match_${matchData.opponent}_${new Date().toISOString().slice(0,10)}.json`;
+                const jsonStr = JSON.stringify(matchData, null, 2);
+                const blob = new Blob([jsonStr], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+            } catch (error) {
+                showError(`Download failed: ${error.message}`);
             }
         }
 
