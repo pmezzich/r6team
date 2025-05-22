@@ -6,6 +6,34 @@
     <title>Create New Team - R6 Tracker</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <style>
+        /* Add loading spinner styles */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #7C3AED;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
         .container {
             max-width: 600px;
             margin: 2rem auto;
@@ -59,9 +87,19 @@
             margin-top: 2rem;
             text-align: center;
         }
+
+        .error-message {
+            color: #ef4444;
+            margin-top: 1rem;
+            display: none;
+        }
     </style>
 </head>
 <body>
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+    </div>
+
     <div class="container">
         <div class="auth-container">
             <h1>Create New Team</h1>
@@ -88,34 +126,56 @@
                 </div>
                 
                 <div class="form-actions">
-                    <button type="submit" class="btn btn-primary">
+                    <button type="submit" class="btn btn-primary" id="submitButton">
                         🚀 Create Team Account
                     </button>
+                    <div class="error-message" id="errorMessage"></div>
                 </div>
             </form>
         </div>
     </div>
 
     <script type="module">
-        import { app, db } from '/~pmezzich/r6tracker/firebase/firebase-config.js?v=2';
+        // Firebase Configuration (embedded directly to avoid path issues)
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+        import { getDatabase, ref, set, get } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
         import { getAuth, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
-        import { ref, set, get } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
 
+        const firebaseConfig = {
+            apiKey: "AIzaSyBRrm0ZrKfhrBWa7A0VghOz82ufJvHeJqI",
+            authDomain: "r6stattracker.firebaseapp.com",
+            databaseURL: "https://r6stattracker-default-rtdb.firebaseio.com",
+            projectId: "r6stattracker",
+            storageBucket: "r6stattracker.appspot.com",
+            messagingSenderId: "575541861129",
+            appId: "1:575541861129:web:28682f4fc01279e46651d8",
+            measurementId: "G-TN7LJDJP3R"
+        };
+
+        const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
+        const db = getDatabase(app);
 
         document.getElementById('teamCreationForm').addEventListener('submit', async (e) => {
             e.preventDefault();
+            const loadingOverlay = document.getElementById('loadingOverlay');
+            const submitButton = document.getElementById('submitButton');
+            const errorMessage = document.getElementById('errorMessage');
             
-            const teamName = document.getElementById('teamName').value.trim();
-            const email = document.getElementById('email').value;
-            const password = document.getElementById('password').value;
-
-            if (!teamName || !email || !password) {
-                alert('Please fill in all fields');
-                return;
-            }
-
             try {
+                // Show loading state
+                loadingOverlay.style.display = 'flex';
+                submitButton.disabled = true;
+                errorMessage.style.display = 'none';
+
+                const teamName = document.getElementById('teamName').value.trim();
+                const email = document.getElementById('email').value;
+                const password = document.getElementById('password').value;
+
+                if (!teamName || !email || !password) {
+                    throw new Error('Please fill in all fields');
+                }
+
                 // Generate team ID
                 const teamId = teamName.toLowerCase()
                     .replace(/\s+/g, '_')
@@ -187,7 +247,13 @@
                 
             } catch (error) {
                 console.error('Team creation error:', error);
-                alert(`Team creation failed: ${error.message}`);
+                errorMessage.textContent = error.message;
+                errorMessage.style.display = 'block';
+                document.getElementById('teamName').value = teamName || '';
+                document.getElementById('email').value = email || '';
+            } finally {
+                loadingOverlay.style.display = 'none';
+                submitButton.disabled = false;
             }
         });
     </script>
