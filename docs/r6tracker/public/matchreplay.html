@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Upload Match Replay</title>
+    <title>Uplowd</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -441,7 +441,7 @@
                             const result = await Promise.race([
                                 window.dissectReplay(uint8Array),
                                 new Promise((_, reject) => 
-                                    setTimeout(() => reject(new Error("Processing timeout (5s)")), 5000)
+                                    setTimeout(() => reject(new Error("Processing timeout (5s)"), 5000)
                                 )
                             ]);
                             
@@ -568,18 +568,28 @@
         function updateEventsDisplay() {
             const accordion = document.getElementById('roundsAccordion');
             accordion.innerHTML = '';
-            
+
             Object.entries(matchData.maps).forEach(([mapKey, mapData]) => {
-                Object.entries(mapData.rounds).forEach(([roundNumber, roundData]) => {
+                const rounds = {};
+                mapData.events.forEach(event => {
+                    const roundKey = `round_${event.round}`;
+                    if (!rounds[roundKey]) {
+                        rounds[roundKey] = [];
+                    }
+                    rounds[roundKey].push(event);
+                });
+
+                Object.entries(rounds).forEach(([roundKey, events]) => {
+                    const roundNumber = roundKey.split('_')[1];
                     const roundDiv = document.createElement('div');
                     roundDiv.className = 'round-event';
                     roundDiv.innerHTML = `
                         <div class="round-header" onclick="toggleRound(this)">
-                            <span>Map: ${mapData.mapName} - Round ${roundNumber}</span>
+                            <span>Map: ${mapData.parsed[Object.keys(mapData.parsed)[0]]?.header?.map?.name || 'Unknown'} - Round ${roundNumber}</span>
                             <span class="toggle-icon">▼</span>
                         </div>
                         <div class="round-events">
-                            ${roundData.events.map(event => {
+                            ${events.map(event => {
                                 const mins = Math.floor(event.timeInSeconds / 60);
                                 const secs = event.timeInSeconds % 60;
                                 const time = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
