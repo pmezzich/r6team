@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Upload</title>
+    <title>Pwease</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -422,7 +422,7 @@
                     matchData.maps[mapKey] = {
                         raw: {},
                         parsed: {},
-                        events: []
+                        rounds: {}
                     };
 
                     for (const file of files) {
@@ -448,22 +448,46 @@
                             const parsedData = JSON.parse(result);
                             console.log("Raw parsedData for", file.name, ":", parsedData);
 
+                            // Store raw data
                             matchData.maps[mapKey].raw[safeKey] = {
                                 data: arrayBuffer,
                                 originalFilename: file.name
                             };
-                            matchData.maps[mapKey].parsed[safeKey] = {
-                                ...parsedData,
-                                originalFilename: file.name
-                            };
-                            
+
+                            // Process events
+                            const formattedEvents = {};
                             if (parsedData.events) {
-                                matchData.maps[mapKey].events.push(...parsedData.events.map(e => ({
-                                    ...e,
-                                    map: parsedData.header?.map?.name,
-                                    round: roundNumber
-                                })));
+                                parsedData.events.forEach((event, index) => {
+                                    formattedEvents[`event_${index}`] = {
+                                        type: {
+                                            id: event.type?.id || 0,
+                                            name: event.type?.name || "Unknown"
+                                        },
+                                        headshot: event.headshot || false,
+                                        target: event.target || "Unknown",
+                                        timeInSeconds: event.timeInSeconds || 0,
+                                        username: event.player?.username || "Unknown",
+                                        site: event.site || "Unknown",
+                                        team: event.teamId || "Unknown"
+                                    };
+                                });
                             }
+
+                            // Store parsed data with Firebase-friendly structure
+                            matchData.maps[mapKey].parsed[safeKey] = {
+                                header: parsedData.header || {},
+                                events: formattedEvents,
+                                duration: parsedData.duration || 0
+                            };
+
+                            // Store round data
+                            matchData.maps[mapKey].rounds[`round_${roundNumber}`] = {
+                                outcome: parsedData.header?.outcome || "Unknown",
+                                site: parsedData.header?.site || "Unknown",
+                                spawn: parsedData.header?.spawnInfo?.name || "Unknown",
+                                duration: parsedData.duration || 0,
+                                events: formattedEvents
+                            };
 
                             output.textContent += ` ✔️`;
 
@@ -570,16 +594,7 @@
             accordion.innerHTML = '';
 
             Object.entries(matchData.maps).forEach(([mapKey, mapData]) => {
-                const rounds = {};
-                mapData.events.forEach(event => {
-                    const roundKey = `round_${event.round}`;
-                    if (!rounds[roundKey]) {
-                        rounds[roundKey] = [];
-                    }
-                    rounds[roundKey].push(event);
-                });
-
-                Object.entries(rounds).forEach(([roundKey, events]) => {
+                Object.entries(mapData.rounds).forEach(([roundKey, roundData]) => {
                     const roundNumber = roundKey.split('_')[1];
                     const roundDiv = document.createElement('div');
                     roundDiv.className = 'round-event';
@@ -589,7 +604,7 @@
                             <span class="toggle-icon">▼</span>
                         </div>
                         <div class="round-events">
-                            ${events.map(event => {
+                            ${Object.entries(roundData.events).map(([eventKey, event]) => {
                                 const mins = Math.floor(event.timeInSeconds / 60);
                                 const secs = event.timeInSeconds % 60;
                                 const time = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
@@ -600,21 +615,21 @@
                                     : `(${teamRole === 'attack' ? 'Defending' : 'Attacking'} Team)`;
 
                                 let details = '';
-                                switch(event.type) {
+                                switch(event.type.name.toLowerCase()) {
                                     case 'kill':
-                                        details = `${event.player} ${teamContext} killed ${event.target || 'unknown'} at ${event.site}${event.headshot ? ' (Headshot)' : ''}`;
+                                        details = `${event.username} ${teamContext} killed ${event.target} at ${event.site}${event.headshot ? ' (Headshot)' : ''}`;
                                         break;
                                     case 'plant':
                                     case 'defuse':
-                                        const verb = event.type === 'plant' ? 'plant' : 'defuse';
+                                        const verb = event.type.name.toLowerCase();
                                         const status = event.success ? 'successful' : 'failed';
-                                        details = `${event.player} ${teamContext} ${verb} ${status} at ${event.site}`;
+                                        details = `${event.username} ${teamContext} ${verb} ${status} at ${event.site}`;
                                         break;
                                     default:
-                                        details = `${event.player} ${teamContext} ${event.type}`;
+                                        details = `${event.username} ${teamContext} ${event.type.name}`;
                                 }
                                 
-                                return `<div class="event-item event-${event.type}">[${time}] ${details}</div>`;
+                                return `<div class="event-item event-${event.type.name.toLowerCase()}">[${time}] ${details}</div>`;
                             }).join('')}
                         </div>
                     `;
