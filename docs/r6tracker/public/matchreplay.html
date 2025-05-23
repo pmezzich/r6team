@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Upload</title>
+    <title>Upload Match Replay</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -384,16 +384,32 @@
                                 rawData: result
                             };
 
-                            // Direct map name extraction
+                            // Map detection
                             if (matchData.maps[mapKey].mapName === "Unknown") {
                                 const headerMap = data.header?.map?.name;
                                 if (headerMap) {
                                     matchData.maps[mapKey].mapName = headerMap.replace(/([a-z])([A-Z])/g, '$1 $2');
-                                } else {
-                                    matchData.maps[mapKey].mapName = "Unknown";
                                 }
                             }
 
+                            // Initialize round object first
+                            matchData.maps[mapKey].rounds[roundNumber] = {
+                                site: data.header?.site || "Unknown",
+                                spawn: data.header?.spawnInfo?.name || "Unknown",
+                                outcome: teams.find(t => t.won) ? 
+                                    `${teams.find(t => t.won).role} ${data.header?.site || "Unknown"}` : 
+                                    data.matchFeedback?.outcome || "unknown",
+                                players: (data.header?.players || []).map(player => ({
+                                    name: player.username || "Unknown",
+                                    operator: player.operator?.name || "Unknown",
+                                    team: data.header?.teams?.[player.teamIndex]?.name || "Unknown"
+                                })),
+                                events: data.matchFeedback || [],
+                                duration: data.header?.matchDuration || 0,
+                                timestamp: new Date(data.header?.timestamp || Date.now()).toISOString()
+                            };
+
+                            // Team identification
                             if (!userTeamId && teams.length >= 2) {
                                 userTeamId = teams[0]?.id || "Unknown";
                                 opponentTeamId = teams[1]?.id || "Unknown";
@@ -404,30 +420,26 @@
                                 output.textContent += `\nIdentified teams: ${teams[0]?.name || 'Unknown'} (Your Team) vs ${teams[1]?.name || 'Unknown'} (Opponent)`;
                             }
 
+                            // Score calculation
                             const winningTeam = teams.find(t => t.won);
-                            if (winningTeam && userTeamId && opponentTeamId) {
+                            if (winningTeam) {
+                                const isAttackWin = winningTeam.role === "Attack";
+                                const isDefenseWin = winningTeam.role === "Defense";
+                                
                                 if (winningTeam.id === userTeamId) {
-                                    matchData.maps[mapKey].teamScore++;
-                                } else if (winningTeam.id === opponentTeamId) {
-                                    matchData.maps[mapKey].opponentScore++;
+                                    matchData.maps[mapKey].teamScore += isAttackWin ? 1 : 0;
+                                    matchData.maps[mapKey].opponentScore += isDefenseWin ? 1 : 0;
+                                } else {
+                                    matchData.maps[mapKey].teamScore += isDefenseWin ? 1 : 0;
+                                    matchData.maps[mapKey].opponentScore += isAttackWin ? 1 : 0;
                                 }
+
+                                // Update global counters
+                                if (isAttackWin) attackWins++;
+                                if (isDefenseWin) defenseWins++;
                             }
 
-                            const roundRole = winningTeam?.role || "Unknown";
-                            if (roundRole === "Attack") attackWins++;
-                            if (roundRole === "Defense") defenseWins++;
-                            
-                            roundOutcomes.push({
-                                round: roundNumber,
-                                winningRole: roundRole,
-                                attackingTeam: teams.find(t => t.role === "Attack")?.name || "Unknown",
-                                defendingTeam: teams.find(t => t.role === "Defense")?.name || "Unknown",
-                                score: {
-                                    attack: teams.find(t => t.role === "Attack")?.score || 0,
-                                    defense: teams.find(t => t.role === "Defense")?.score || 0
-                                }
-                            });
-
+                            // Operator tracking
                             const players = data.header?.players || [];
                             if (!trackedPlayer && players.length > 0) {
                                 trackedPlayer = players[Math.floor(Math.random() * players.length)].username;
@@ -452,28 +464,13 @@
                                 }
                                 currentTrackedRole = newRole;
 
+                                // Add tracking to existing round object
                                 matchData.maps[mapKey].rounds[roundNumber].operatorTracking = {
                                     player: trackedPlayer,
                                     operator: currentOp,
                                     role: newRole
                                 };
                             }
-
-                            matchData.maps[mapKey].rounds[roundNumber] = {
-                                site: data.header?.site || "Unknown",
-                                spawn: data.header?.spawnInfo?.name || "Unknown",
-                                outcome: winningTeam ? 
-                                    `${winningTeam.role} ${data.header?.site || "Unknown"}` : 
-                                    data.matchFeedback?.outcome || "unknown",
-                                players: (data.header?.players || []).map(player => ({
-                                    name: player.username || "Unknown",
-                                    operator: player.operator?.name || "Unknown",
-                                    team: data.header?.teams?.[player.teamIndex]?.name || "Unknown"
-                                })),
-                                events: data.matchFeedback || [],
-                                duration: data.header?.matchDuration || 0,
-                                timestamp: new Date(data.header?.timestamp || Date.now()).toISOString()
-                            };
 
                             output.textContent += ` ✔️`;
 
