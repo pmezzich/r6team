@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Upload Match Replay</title>
+    <title>Upload</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -98,27 +98,11 @@
             color: white;
         }
 
-        .map-upload {
-            margin-bottom: 2rem;
-            padding: 1rem;
-            background: #2d2d2d;
-            border-radius: 4px;
-        }
-
         .form-actions {
             margin-top: 1rem;
             display: flex;
             gap: 1rem;
             flex-wrap: wrap;
-        }
-
-        .raw-data-toggle {
-            margin: 1rem 0;
-            background: #333;
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
-            cursor: pointer;
-            display: inline-block;
         }
 
         .raw-data-content {
@@ -134,6 +118,44 @@
 
         .raw-data-content.visible {
             display: block;
+        }
+
+        .event-item {
+            padding: 0.5rem;
+            margin: 0.25rem 0;
+            background: #2d2d2d;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        .event-kill { border-left: 4px solid #EF4444; }
+        .event-plant { border-left: 4px solid #10B981; }
+        .event-defuse { border-left: 4px solid #3B82F6; }
+        .round-event {
+            margin-bottom: 1rem;
+            background: #2d2d2d;
+            border-radius: 4px;
+        }
+        .round-header {
+            padding: 0.75rem;
+            display: flex;
+            justify-content: space-between;
+            cursor: pointer;
+            background: #3d3d3d;
+            border-radius: 4px 4px 0 0;
+        }
+        .round-events {
+            display: none;
+            padding: 0.5rem;
+        }
+        .round-events.visible {
+            display: block;
+        }
+        .toggle-icon {
+            margin-left: 1rem;
+            transition: transform 0.2s;
+        }
+        .toggled .toggle-icon {
+            transform: rotate(180deg);
         }
     </style>
 </head>
@@ -164,19 +186,22 @@
 
         <div id="mapInputs">
             <div class="map-upload">
-                <label>Upload Folder for Map 1:</label>
+                <label>Upload Replay Files:</label>
                 <input type="file" class="folder-upload" webkitdirectory directory multiple>
             </div>
         </div>
 
         <div class="form-actions">
-            <button class="btn btn-secondary" onclick="addMapUpload()">➕ Add Map</button>
             <button class="btn btn-success" onclick="submitReplayData()">🚀 Upload Match</button>
-            <button class="raw-data-toggle" onclick="toggleRawData()">📄 Toggle Raw Data</button>
+            <button class="btn btn-primary" onclick="downloadJSON()">💾 Download JSON</button>
+            <button class="btn btn-secondary" onclick="toggleEvents()">📜 Show Events</button>
         </div>
 
         <div id="outputLog" class="output-log"></div>
-        <div id="rawDataDump" class="raw-data-content"></div>
+        <div id="eventsSection" class="raw-data-content">
+            <h3 style="color: #7C3AED; margin-bottom: 0.5rem;">Round Events</h3>
+            <div id="roundsAccordion" style="color: white;"></div>
+        </div>
     </div>
 
     <script>
@@ -191,38 +216,14 @@
             measurementId: "G-TN7LJDJP3R"
         };
 
-        const ATTACK_OPS = new Set([
-            'Striker','Sledge','Thatcher','Ash','Thermite','Montagne','Twitch','Blitz','IQ',
-            'Fuze','Glaz','Buck','Blackbeard','Capitao','Hibana','Jackal','Ying','Zofia',
-            'Dokkaebi','Lion','Finka','Maverick','Nomad','Gridlock','Nokk','Amaru','Kali',
-            'Iana','Ace','Zero','Flores','Osa','Sens','Grim','Brava','Ram','Deimos','Rauora'
-        ]);
-
-        const DEFENSE_OPS = new Set([
-            'Sentry','Mute','Smoke','Castle','Pulse','Doc','Rook','Kapkan','Tachanka',
-            'Jäger','Bandit','Frost','Valkyrie','Caveira','Echo','Mira','Lesion','Ela',
-            'Vigil','Maestro','Alibi','Clash','Kaid','Mozzie','Warden','Goyo','Wamai','Oryx',
-            'Melusi','Aruni','Thunderbird','Thorn','Azami','Solis','Fenrir','Tubarao','Skopos'
-        ]);
-
         const app = firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
         const db = firebase.database();
 
-        if (window.location.hostname === "localhost") {
-            console.log("Using Firebase emulators");
-            auth.useEmulator("http://localhost:9099");
-            db.useEmulator("localhost", 9000);
-        }
-
         let teamId = null;
-        let userTeamName = "";
         const go = new Go();
         let wasmReady = false;
-        let rawReplayData = {};
-        let trackedPlayer = null;
-        let currentTrackedRole = null;
-        let roleChanges = [];
+        let matchData = {};
 
         function getRoundNumber(filename) {
             const match = filename.match(/R(\d+)\.rec/i);
@@ -234,13 +235,11 @@
                 .then(result => {
                     go.run(result.instance);
                     wasmReady = true;
-                    console.log("WASM module loaded successfully");
+                    console.log("WASM module loaded");
                 })
-                .catch(async error => {
-                    console.error("WASM initialization failed:", error);
-                    showError("Failed to load analysis engine. Retrying...");
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    initializeWASM();
+                .catch(error => {
+                    console.error("WASM init failed:", error);
+                    showError("Analysis engine failed to load");
                 });
         }
         initializeWASM();
@@ -248,38 +247,25 @@
         auth.onAuthStateChanged(async (user) => {
             const loginSection = document.getElementById('login');
             const uploadSection = document.getElementById('replayUploader');
-            const errorMessage = document.getElementById('errorMessage');
-            
-            errorMessage.style.display = 'none';
             
             if (user) {
-                try {
-                    loginSection.style.display = "none";
-                    uploadSection.style.display = "block";
-                    
-                    const teamSnapshot = await db.ref(`users/${user.uid}/teamId`).get();
-                    if (!teamSnapshot.exists()) throw new Error("No team association");
-                    teamId = teamSnapshot.val();
-
-                    const teamNameSnapshot = await db.ref(`teams/${teamId}/info/teamName`).get();
-                    userTeamName = teamNameSnapshot.val();
-                    document.getElementById('teamName').textContent = userTeamName;
-                } catch (error) {
-                    showError(`Error: ${error.message}`);
-                    auth.signOut();
-                }
+                loginSection.style.display = "none";
+                uploadSection.style.display = "block";
+                
+                const teamSnapshot = await db.ref(`users/${user.uid}/teamId`).get();
+                teamId = teamSnapshot.exists() ? teamSnapshot.val() : null;
+                
+                const teamName = await db.ref(`teams/${teamId}/info/teamName`).get();
+                document.getElementById('teamName').textContent = teamName.val() || "Unknown Team";
             } else {
                 loginSection.style.display = "block";
                 uploadSection.style.display = "none";
-                teamId = null;
-                userTeamName = "";
             }
         });
 
         async function login() {
             const email = document.getElementById("email").value;
             const password = document.getElementById("password").value;
-            
             try {
                 await auth.signInWithEmailAndPassword(email, password);
             } catch (error) {
@@ -291,276 +277,150 @@
             auth.signOut();
         }
 
-        let mapCounter = 1;
-        function addMapUpload() {
-            mapCounter++;
-            const container = document.createElement('div');
-            container.className = 'map-upload';
-            container.innerHTML = `
-                <label>Upload Folder for Map ${mapCounter}:</label>
-                <input type="file" class="folder-upload" webkitdirectory directory multiple>
-            `;
-            document.getElementById('mapInputs').appendChild(container);
-        }
-
         async function submitReplayData() {
             const output = document.getElementById('outputLog');
             const opponentInput = document.getElementById('opponentInput');
-            rawReplayData = {};
             
-            const currentOpponent = opponentInput.value.trim();
-            output.textContent = '🚀 Starting upload process...\n';
-
-            let yourAttackWins = 0;
-            let yourDefenseWins = 0;
-            let opponentAttackWins = 0;
-            let opponentDefenseWins = 0;
-            let yourTeamWins = 0;
-            let opponentWins = 0;
-            const roundOutcomes = [];
-            trackedPlayer = null;
-            currentTrackedRole = null;
-            roleChanges = [];
+            output.textContent = '🚀 Starting upload...\n';
+            matchData = {
+                opponent: opponentInput.value.trim(),
+                teamId,
+                date: new Date().toISOString(),
+                rounds: {}
+            };
 
             try {
-                if (!wasmReady) throw new Error("Analysis engine still loading");
+                if (!wasmReady) throw new Error("Analysis engine not ready");
                 if (!teamId) throw new Error("Not authenticated");
-                if (!currentOpponent) throw new Error("Opponent name required");
+                if (!matchData.opponent) throw new Error("Opponent name required");
 
-                const uploadBlocks = document.querySelectorAll('.map-upload');
-                const matchData = {
-                    opponent: currentOpponent,
-                    teamId,
-                    date: new Date().toISOString(),
-                    maps: {},
-                    roleChanges: [],
-                    scoreSummary: {}
-                };
+                const input = document.querySelector('.folder-upload');
+                const files = [...input.files].filter(f => f.name.endsWith(".rec"));
 
-                for (const [mapIndex, block] of uploadBlocks.entries()) {
-                    const input = block.querySelector('input');
-                    let files = [...input.files].filter(f => f.name.endsWith(".rec"));
-                    
-                    files = files.sort((a, b) => {
-                        const aRound = getRoundNumber(a.name);
-                        const bRound = getRoundNumber(b.name);
-                        return aRound - bRound;
-                    });
-
-                    if (files.length === 0) continue;
-
-                    const mapKey = `map_${mapIndex}`;
-                    
-                    matchData.maps[mapKey] = {
-                        mapName: "Unknown",
-                        folderName: files[0]?.webkitRelativePath?.split("/")[0] || `Map_${mapIndex+1}`,
-                        rounds: {},
-                        teamScore: 0,
-                        opponentScore: 0,
-                        userTeamId: "Unknown",
-                        opponentTeamId: "Unknown"
-                    };
-
-                    for (const [fileIndex, file] of files.entries()) {
-                        const roundNumber = getRoundNumber(file.name);
-                        if (!roundNumber) {
-                            output.textContent += `\n⚠️ Invalid filename: ${file.name} - skipping`;
-                            continue;
-                        }
-
-                        try {
-                            output.textContent += `\nProcessing ${file.name}...`;
-                            const arrayBuffer = await file.arrayBuffer();
-                            const uint8Array = new Uint8Array(arrayBuffer);
-                            
-                            const result = await Promise.race([
-                                window.dissectReplay(uint8Array),
-                                new Promise((_, reject) => 
-                                    setTimeout(() => reject(new Error("Processing timeout (5s)")), 5000)
-                                )
-                            ]);
-                            
-                            const data = JSON.parse(result);
-                            const teams = data.header?.teams || [];
-
-                            rawReplayData[file.name] = {
-                                fileName: file.name,
-                                processedData: data,
-                                rawData: result
-                            };
-
-                            if (matchData.maps[mapKey].mapName === "Unknown") {
-                                const headerMap = data.header?.map?.name;
-                                if (headerMap) {
-                                    matchData.maps[mapKey].mapName = headerMap.replace(/([a-z])([A-Z])/g, '$1 $2');
-                                }
-                            }
-
-                            let yourTeamRole = "Unknown";
-                            let opponentTeamRole = "Unknown";
-                            let winningTeam = null;
-
-                            teams.forEach(team => {
-                                // Fixed team name comparison
-                                const replayTeamName = team.name.trim().toLowerCase();
-                                const storedUserTeamName = userTeamName.trim().toLowerCase();
-
-                                if (replayTeamName === storedUserTeamName) {
-                                    yourTeamRole = team.role;
-                                    if (team.won) {
-                                        yourTeamWins++;
-                                        if (team.role === "Attack") yourAttackWins++;
-                                        if (team.role === "Defense") yourDefenseWins++;
-                                    }
-                                } else {
-                                    opponentTeamRole = team.role;
-                                    if (team.won) {
-                                        opponentWins++;
-                                        if (team.role === "Attack") opponentAttackWins++;
-                                        if (team.role === "Defense") opponentDefenseWins++;
-                                    }
-                                }
-
-                                if (team.won) winningTeam = team;
-                            });
-
-                            matchData.maps[mapKey].rounds[roundNumber] = {
-                                site: data.header?.site || "Unknown",
-                                spawn: data.header?.spawnInfo?.name || "Unknown",
-                                outcome: winningTeam ? 
-                                    `${winningTeam.role} ${data.header?.site || "Unknown"}` : 
-                                    data.matchFeedback?.outcome || "unknown",
-                                players: (data.header?.players || []).map(player => ({
-                                    name: player.username || "Unknown",
-                                    operator: player.operator?.name || "Unknown",
-                                    team: data.header?.teams?.[player.teamIndex]?.name || "Unknown"
-                                })),
-                                events: data.matchFeedback || [],
-                                duration: data.header?.matchDuration || 0,
-                                timestamp: new Date(data.header?.timestamp || Date.now()).toISOString(),
-                                yourRole: yourTeamRole,
-                                opponentRole: opponentTeamRole
-                            };
-
-                            roundOutcomes.push({
-                                round: roundNumber,
-                                yourScore: yourTeamWins,
-                                opponentScore: opponentWins,
-                                yourRole: yourTeamRole,
-                                opponentRole: opponentTeamRole,
-                                winner: winningTeam?.name || "Unknown"
-                            });
-
-                            const players = data.header?.players || [];
-                            if (!trackedPlayer && players.length > 0) {
-                                trackedPlayer = players[Math.floor(Math.random() * players.length)].username;
-                                output.textContent += `\n🎯 Tracking operator changes for: ${trackedPlayer}`;
-                            }
-
-                            const playerData = players.find(p => p.username === trackedPlayer);
-                            if (playerData) {
-                                const currentOp = playerData.operator?.name || "Unknown";
-                                const newRole = ATTACK_OPS.has(currentOp) ? 'Attack' :
-                                              DEFENSE_OPS.has(currentOp) ? 'Defense' : 
-                                              'Unknown';
-
-                                if (currentTrackedRole && newRole !== currentTrackedRole) {
-                                    roleChanges.push({
-                                        round: roundNumber,
-                                        from: currentTrackedRole,
-                                        to: newRole,
-                                        operator: currentOp
-                                    });
-                                    output.textContent += `\n🛡️➡️⚔️ Role change: ${currentTrackedRole} → ${newRole} (${currentOp})`;
-                                }
-                                currentTrackedRole = newRole;
-
-                                matchData.maps[mapKey].rounds[roundNumber].operatorTracking = {
-                                    player: trackedPlayer,
-                                    operator: currentOp,
-                                    role: newRole
-                                };
-                            }
-
-                            output.textContent += ` ✔️`;
-
-                        } catch (error) {
-                            console.error(`Error processing ${file.name}:`, error);
-                            output.textContent += `\n❌ Error in ${file.name}: ${error.message}`;
-                        }
+                for (const file of files) {
+                    const roundNumber = getRoundNumber(file.name);
+                    if (!roundNumber) {
+                        output.textContent += `\n⚠️ Invalid filename: ${file.name} - skipping`;
+                        continue;
                     }
 
-                    matchData.maps[mapKey].teamScore = yourTeamWins;
-                    matchData.maps[mapKey].opponentScore = opponentWins;
+                    output.textContent += `\nProcessing ${file.name}...`;
+                    
+                    try {
+                        const arrayBuffer = await file.arrayBuffer();
+                        const uint8Array = new Uint8Array(arrayBuffer);
+                        const result = await window.dissectReplay(uint8Array);
+                        const parsedData = JSON.parse(result);
+
+                        const roundKey = `round_${roundNumber}`;
+                        matchData.rounds[roundKey] = {
+                            duration: parsedData.duration || 0,
+                            events: {}
+                        };
+
+                        if (parsedData.events) {
+                            parsedData.events.forEach((event, index) => {
+                                matchData.rounds[roundKey].events[`event_${index}`] = {
+                                    type: event.type?.name || "Unknown",
+                                    player: event.player?.username || "Unknown",
+                                    target: event.target || "Unknown",
+                                    timeInSeconds: event.timeInSeconds || 0,
+                                    headshot: event.headshot || false,
+                                    site: event.site || "Unknown"
+                                };
+                            });
+                        }
+
+                        output.textContent += ` ✔️`;
+
+                    } catch (error) {
+                        console.error(`Error processing ${file.name}:`, error);
+                        output.textContent += `\n❌ Error in ${file.name}: ${error.message}`;
+                    }
                 }
 
-                matchData.roleChanges = roleChanges;
-                matchData.scoreSummary = {
-                    yourTeam: yourTeamWins,
-                    opponent: opponentWins,
-                    yourAttackWins,
-                    yourDefenseWins,
-                    opponentAttackWins,
-                    opponentDefenseWins,
-                    finalScore: `${yourTeamWins}-${opponentWins}`,
-                    roundOutcomes
-                };
-
-                const matchRef = db.ref(`teams/${teamId}/matches_pro`).push();
+                const matchRef = db.ref("matches").push();
                 await matchRef.set(matchData);
+                
                 output.textContent += `\n🎉 Match saved! ID: ${matchRef.key}`;
-
-                output.textContent += `\n\n🔍 Final Results:`;
-                output.textContent += `\n🔵 Your Team: ${yourTeamWins} (Attack: ${yourAttackWins}, Defense: ${yourDefenseWins})`;
-                output.textContent += `\n🛡️ Opponents: ${opponentWins} (Attack: ${opponentAttackWins}, Defense: ${opponentDefenseWins})`;
-                output.textContent += `\n🔄 Role Changes: ${roleChanges.length}`;
-                roleChanges.forEach(change => {
-                    output.textContent += `\n• Round ${change.round}: ${change.from} → ${change.to} (${change.operator})`;
-                });
-
+                updateEventsDisplay();
                 opponentInput.value = '';
-                document.getElementById('mapInputs').innerHTML = `
-                    <div class="map-upload">
-                        <label>Upload Folder for Map 1:</label>
-                        <input type="file" class="folder-upload" webkitdirectory directory multiple>
-                    </div>`;
-                mapCounter = 1;
 
             } catch (error) {
-                console.error("Error:", error);
+                console.error(error);
                 showError(error.message);
                 output.textContent += `\n❌ Error: ${error.message}`;
-                opponentInput.value = currentOpponent;
             }
         }
 
-        function toggleRawData() {
-            const dumpElement = document.getElementById('rawDataDump');
-            dumpElement.classList.toggle('visible');
-            
-            if (dumpElement.classList.contains('visible')) {
-                let formattedData = "=== Raw Replay Data ===\n\n";
-                Object.values(rawReplayData).forEach(fileData => {
-                    formattedData += `File: ${fileData.fileName}\n`;
-                    if (fileData.error) {
-                        formattedData += `❌ Error: ${fileData.error}\n\n`;
-                        return;
-                    }
-                    formattedData += "Processed Data:\n" + 
-                        JSON.stringify(fileData.processedData, null, 2) + 
-                        "\n\nRaw Data:\n" + 
-                        JSON.stringify(fileData.rawData, null, 2) + 
-                        "\n\n────────────────────\n\n";
-                });
-                dumpElement.textContent = formattedData;
+        function updateEventsDisplay() {
+            const accordion = document.getElementById('roundsAccordion');
+            accordion.innerHTML = '';
+
+            if (!matchData.rounds) return;
+
+            Object.entries(matchData.rounds).forEach(([roundKey, roundData]) => {
+                const roundNumber = roundKey.split('_')[1];
+                const roundDiv = document.createElement('div');
+                roundDiv.className = 'round-event';
+                
+                roundDiv.innerHTML = `
+                    <div class="round-header" onclick="toggleRound(this)">
+                        <span>Round ${roundNumber} (${formatTime(roundData.duration)})</span>
+                        <span class="toggle-icon">▼</span>
+                    </div>
+                    <div class="round-events">
+                        ${Object.values(roundData.events).map(event => `
+                            <div class="event-item event-${event.type.toLowerCase()}">
+                                [${formatTime(event.timeInSeconds)}] 
+                                ${event.player}
+                                ${event.type} 
+                                ${event.target ? `→ ${event.target}` : ''}
+                                ${event.headshot ? '(HS)' : ''}
+                                ${event.site ? `@ ${event.site}` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+                accordion.appendChild(roundDiv);
+            });
+        }
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
+        }
+
+        function toggleRound(header) {
+            const content = header.parentElement.querySelector('.round-events');
+            content.classList.toggle('visible');
+            header.parentElement.classList.toggle('toggled');
+        }
+
+        function toggleEvents() {
+            document.getElementById('eventsSection').classList.toggle('visible');
+        }
+
+        function downloadJSON() {
+            try {
+                const blob = new Blob([JSON.stringify(matchData, null, 2)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `match_${matchData.opponent}_${new Date().toISOString()}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                showError("Download failed: " + error.message);
             }
         }
 
         function showError(message) {
-            const errorMessage = document.getElementById('errorMessage');
-            errorMessage.textContent = message;
-            errorMessage.style.display = 'block';
-            setTimeout(() => errorMessage.style.display = 'none', 10000);
+            const errorElement = document.getElementById('errorMessage');
+            errorElement.textContent = message;
+            errorElement.style.display = 'block';
+            setTimeout(() => errorElement.style.display = 'none', 10000);
         }
     </script>
 </body>
