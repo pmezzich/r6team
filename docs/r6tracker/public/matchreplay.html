@@ -494,7 +494,7 @@
                     }
                 }
 
-                const matchRef = db.ref(`teams/${teamId}/matches`).push();
+                const matchRef = db.ref(`teams/${teamId}/matches_pro`).push();
                 await matchRef.set(matchData);
                 output.textContent += `\n🎉 Match saved! ID: ${matchRef.key}`;
 
