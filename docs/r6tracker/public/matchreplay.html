@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Match</title>
+    <title>Upload Match Replay</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -311,8 +311,10 @@
             const currentOpponent = opponentInput.value.trim();
             output.textContent = '🚀 Starting upload process...\n';
 
-            let attackWins = 0;
-            let defenseWins = 0;
+            let yourAttackWins = 0;
+            let yourDefenseWins = 0;
+            let opponentAttackWins = 0;
+            let opponentDefenseWins = 0;
             let yourTeamWins = 0;
             let opponentWins = 0;
             const roundOutcomes = [];
@@ -348,8 +350,6 @@
                     if (files.length === 0) continue;
 
                     const mapKey = `map_${mapIndex}`;
-                    let userTeamId = null;
-                    let opponentTeamId = null;
                     
                     matchData.maps[mapKey] = {
                         mapName: "Unknown",
@@ -376,7 +376,7 @@
                             const result = await Promise.race([
                                 window.dissectReplay(uint8Array),
                                 new Promise((_, reject) => 
-                                    setTimeout(() => reject(new Error("Processing timeout (5s)")), 5000)
+                                    setTimeout(() => reject(new Error("Processing timeout (5s)"), 5000)
                                 )
                             ]);
                             
@@ -396,11 +396,35 @@
                                 }
                             }
 
+                            let yourTeamRole = "Unknown";
+                            let opponentTeamRole = "Unknown";
+                            let winningTeam = null;
+
+                            teams.forEach(team => {
+                                if (team.name.trim() === userTeamName) {
+                                    yourTeamRole = team.role;
+                                    if (team.won) {
+                                        yourTeamWins++;
+                                        if (team.role === "Attack") yourAttackWins++;
+                                        if (team.role === "Defense") yourDefenseWins++;
+                                    }
+                                } else {
+                                    opponentTeamRole = team.role;
+                                    if (team.won) {
+                                        opponentWins++;
+                                        if (team.role === "Attack") opponentAttackWins++;
+                                        if (team.role === "Defense") opponentDefenseWins++;
+                                    }
+                                }
+
+                                if (team.won) winningTeam = team;
+                            });
+
                             matchData.maps[mapKey].rounds[roundNumber] = {
                                 site: data.header?.site || "Unknown",
                                 spawn: data.header?.spawnInfo?.name || "Unknown",
-                                outcome: teams.find(t => t.won) ? 
-                                    `${teams.find(t => t.won).role} ${data.header?.site || "Unknown"}` : 
+                                outcome: winningTeam ? 
+                                    `${winningTeam.role} ${data.header?.site || "Unknown"}` : 
                                     data.matchFeedback?.outcome || "unknown",
                                 players: (data.header?.players || []).map(player => ({
                                     name: player.username || "Unknown",
@@ -409,41 +433,18 @@
                                 })),
                                 events: data.matchFeedback || [],
                                 duration: data.header?.matchDuration || 0,
-                                timestamp: new Date(data.header?.timestamp || Date.now()).toISOString()
+                                timestamp: new Date(data.header?.timestamp || Date.now()).toISOString(),
+                                yourRole: yourTeamRole,
+                                opponentRole: opponentTeamRole
                             };
-
-                            let roundUserScore = 0;
-                            let roundOpponentScore = 0;
-                            let roundWinningRole = "Unknown";
-
-                            teams.forEach(team => {
-                                if (team.name.trim() === userTeamName) {
-                                    if (team.won) {
-                                        roundUserScore++;
-                                        yourTeamWins++;
-                                    }
-                                } else {
-                                    if (team.won) {
-                                        roundOpponentScore++;
-                                        opponentWins++;
-                                    }
-                                }
-
-                                if (team.won) {
-                                    roundWinningRole = team.role;
-                                    if (team.role === "Attack") attackWins++;
-                                    if (team.role === "Defense") defenseWins++;
-                                }
-                            });
-
-                            matchData.maps[mapKey].teamScore += roundUserScore;
-                            matchData.maps[mapKey].opponentScore += roundOpponentScore;
 
                             roundOutcomes.push({
                                 round: roundNumber,
-                                winningRole: roundWinningRole,
-                                yourScore: roundUserScore,
-                                opponentScore: roundOpponentScore
+                                yourScore: yourTeamWins,
+                                opponentScore: opponentWins,
+                                yourRole: yourTeamRole,
+                                opponentRole: opponentTeamRole,
+                                winner: winningTeam?.name || "Unknown"
                             });
 
                             const players = data.header?.players || [];
@@ -484,14 +485,19 @@
                             output.textContent += `\n❌ Error in ${file.name}: ${error.message}`;
                         }
                     }
+
+                    matchData.maps[mapKey].teamScore = yourTeamWins;
+                    matchData.maps[mapKey].opponentScore = opponentWins;
                 }
 
                 matchData.roleChanges = roleChanges;
                 matchData.scoreSummary = {
                     yourTeam: yourTeamWins,
                     opponent: opponentWins,
-                    attackWins,
-                    defenseWins,
+                    yourAttackWins,
+                    yourDefenseWins,
+                    opponentAttackWins,
+                    opponentDefenseWins,
                     finalScore: `${yourTeamWins}-${opponentWins}`,
                     roundOutcomes
                 };
@@ -501,8 +507,8 @@
                 output.textContent += `\n🎉 Match saved! ID: ${matchRef.key}`;
 
                 output.textContent += `\n\n🔍 Final Results:`;
-                output.textContent += `\n🔵 Your Team: ${yourTeamWins} (${attackWins} Attack, ${defenseWins} Defense)`;
-                output.textContent += `\n🛡️ Opponents: ${opponentWins}`;
+                output.textContent += `\n🔵 Your Team: ${yourTeamWins} (Attack: ${yourAttackWins}, Defense: ${yourDefenseWins})`;
+                output.textContent += `\n🛡️ Opponents: ${opponentWins} (Attack: ${opponentAttackWins}, Defense: ${opponentDefenseWins})`;
                 output.textContent += `\n🔄 Role Changes: ${roleChanges.length}`;
                 roleChanges.forEach(change => {
                     output.textContent += `\n• Round ${change.round}: ${change.from} → ${change.to} (${change.operator})`;
