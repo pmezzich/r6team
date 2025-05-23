@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6,7 +7,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Uplowd</title>
+    <title>Upload Match Replay43</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -146,50 +147,6 @@
         .event-kill { border-left: 4px solid #EF4444; }
         .event-plant { border-left: 4px solid #10B981; }
         .event-defuse { border-left: 4px solid #3B82F6; }
-        .round-event {
-            margin-bottom: 1rem;
-            background: #2d2d2d;
-            border-radius: 4px;
-        }
-        .round-header {
-            padding: 0.75rem;
-            display: flex;
-            justify-content: space-between;
-            cursor: pointer;
-            background: #3d3d3d;
-            border-radius: 4px 4px 0 0;
-        }
-        .round-events {
-            display: none;
-            padding: 0.5rem;
-        }
-        .round-events.visible {
-            display: block;
-        }
-        .toggle-icon {
-            margin-left: 1rem;
-            transition: transform 0.2s;
-        }
-        .toggled .toggle-icon {
-            transform: rotate(180deg);
-        }
-        .team-selection {
-            margin: 1rem 0;
-            padding: 1rem;
-            background: #2d2d2d;
-            border-radius: 4px;
-        }
-        .team-option {
-            padding: 0.5rem;
-            margin: 0.25rem;
-            cursor: pointer;
-            border-radius: 4px;
-            border: 1px solid #404040;
-        }
-        .team-option.selected {
-            background: #7C3AED;
-            border-color: #7C3AED;
-        }
     </style>
 </head>
 <body>
@@ -217,11 +174,6 @@
             <input type="text" id="opponentInput" class="form-input" required>
         </div>
 
-        <div class="team-selection" id="teamSelection" style="display: none;">
-            <label>Select Your Team:</label>
-            <div id="teamOptions" style="margin-top: 0.5rem;"></div>
-        </div>
-
         <div id="mapInputs">
             <div class="map-upload">
                 <label>Upload Folder for Map 1:</label>
@@ -239,26 +191,12 @@
         <div id="outputLog" class="output-log"></div>
         <div id="rawDataDump" class="raw-data-content"></div>
         <div id="eventsSection" class="raw-data-content">
-            <h3 style="color: #7C3AED; margin-bottom: 0.5rem;">Round Events</h3>
-            <div id="roundsAccordion" style="color: white;"></div>
+            <h3 style="color: #7C3AED; margin-bottom: 0.5rem;">Match Events Timeline</h3>
+            <div id="eventsLog" class="output-log" style="max-height: 600px;"></div>
         </div>
     </div>
 
     <script>
-        const ATTACK_OPS = new Set([
-            'Striker','Sledge','Thatcher','Ash','Thermite','Montagne','Twitch','Blitz','IQ',
-            'Fuze','Glaz','Buck','Blackbeard','Capitao','Hibana','Jackal','Ying','Zofia',
-            'Dokkaebi','Lion','Finka','Maverick','Nomad','Gridlock','Nokk','Amaru','Kali',
-            'Iana','Ace','Zero','Flores','Osa','Sens','Grim','Brava','Ram','Deimos','Rauora'
-        ]);
-
-        const DEFENSE_OPS = new Set([
-            'Sentry','Mute','Smoke','Castle','Pulse','Doc','Rook','Kapkan','Tachanka',
-            'Jäger','Bandit','Frost','Valkyrie','Caveira','Echo','Mira','Lesion','Ela',
-            'Vigil','Maestro','Alibi','Clash','Kaid','Mozzie','Warden','Goyo','Wamai','Oryx',
-            'Melusi','Aruni','Thunderbird','Thorn','Azami','Solis','Fenrir','Tubarao','Skopos'
-        ]);
-
         const firebaseConfig = {
             apiKey: "AIzaSyBRrm0ZrKfhrBWa7A0VghOz82ufJvHeJqI",
             authDomain: "r6stattracker.firebaseapp.com",
@@ -284,23 +222,11 @@
         const go = new Go();
         let wasmReady = false;
         let rawReplayData = {};
-        let matchData = {};
-        let selectedTeamId = null;
-        let availableTeams = [];
-        let processingState = {};
+        let matchEvents = [];
 
         function getRoundNumber(filename) {
             const match = filename.match(/R(\d+)\.rec/i);
             return match ? parseInt(match[1]) : null;
-        }
-
-        function validateMatchData(data) {
-            return Boolean(
-                data.opponent &&
-                data.teamId &&
-                Object.keys(data.maps).length > 0 &&
-                data.date
-            );
         }
 
         function initializeWASM() {
@@ -379,8 +305,7 @@
             const output = document.getElementById('outputLog');
             const opponentInput = document.getElementById('opponentInput');
             rawReplayData = {};
-            matchData = {};
-            processingState = {};
+            matchEvents = [];
             
             const currentOpponent = opponentInput.value.trim();
             output.textContent = '🚀 Starting upload process...\n';
@@ -391,18 +316,11 @@
                 if (!currentOpponent) throw new Error("Opponent name required");
 
                 const uploadBlocks = document.querySelectorAll('.map-upload');
-                matchData = {
+                const matchData = {
                     opponent: currentOpponent,
                     teamId,
                     date: new Date().toISOString(),
-                    maps: {},
-                    events: []
-                };
-
-                processingState = {
-                    currentMapIndex: 0,
-                    currentFileIndex: 0,
-                    paused: false
+                    maps: {}
                 };
 
                 for (const [mapIndex, block] of uploadBlocks.entries()) {
@@ -418,6 +336,8 @@
                     if (files.length === 0) continue;
 
                     const mapKey = `map_${mapIndex}`;
+                    let userTeamId = null;
+                    let opponentTeamId = null;
                     
                     matchData.maps[mapKey] = {
                         mapName: "Unknown",
@@ -430,8 +350,6 @@
                     };
 
                     for (const [fileIndex, file] of files.entries()) {
-                        if (processingState.paused) break;
-                        
                         const roundNumber = getRoundNumber(file.name);
                         if (!roundNumber) {
                             output.textContent += `\n⚠️ Invalid filename: ${file.name} - skipping`;
@@ -465,81 +383,66 @@
                                     "Unknown";
                             }
 
-                            if (teams.length >= 2 && availableTeams.length === 0) {
-                                availableTeams = teams.map(t => ({
-                                    id: t.id,
-                                    name: t.name,
-                                    role: t.players?.some(p => p.operator && ATTACK_OPS.has(p.operator.name)) 
-                                        ? 'attack' 
-                                        : 'defense'
-                                }));
-                                showTeamSelection(availableTeams);
-                                processingState = {
-                                    currentMapIndex: mapIndex,
-                                    currentFileIndex: fileIndex,
-                                    paused: true
-                                };
-                                output.textContent += '\n⏳ Please select your team to continue';
-                                return;
-                            }
-
-                            const outcome = data.header?.outcome?.toLowerCase() || '';
-                            const teamRole = availableTeams.find(t => t.id === selectedTeamId)?.role?.toLowerCase() || 'attack';
-                            
-                            // Score calculation logic
-                            if (outcome.includes('attack')) {
-                                teamRole === 'attack'
-                                    ? matchData.maps[mapKey].teamScore++
-                                    : matchData.maps[mapKey].opponentScore++;
-                            }
-                            else if (outcome.includes('defense')) {
-                                teamRole === 'defense'
-                                    ? matchData.maps[mapKey].teamScore++
-                                    : matchData.maps[mapKey].opponentScore++;
-                            }
-                            else {
-                                const attackers = (data.header?.players || []).filter(p => 
-                                    p.operator && ATTACK_OPS.has(p.operator.name)
-                                ).length;
+                            console.log("Teams data:", JSON.stringify(teams, null, 2));
+                            if (teams.length >= 2) {
+                                const team1 = teams[0];
+                                const team2 = teams[1];
                                 
-                                attackers > 0 
-                                    ? matchData.maps[mapKey].teamScore++
-                                    : matchData.maps[mapKey].opponentScore++;
+                                if (!userTeamId) {
+                                    userTeamId = team1.id || team1.name;
+                                    opponentTeamId = team2.id || team2.name;
+                                    
+                                    matchData.maps[mapKey].userTeamId = userTeamId;
+                                    matchData.maps[mapKey].opponentTeamId = opponentTeamId;
+                                    
+                                    output.textContent += `\nIdentified teams: ${team1.name || 'Unknown'} (Your Team) vs ${team2.name || 'Unknown'} (Opponent)`;
+                                }
+                            } else {
+                                console.error("Insufficient teams in replay:", teams);
+                                output.textContent += `\n⚠️ Invalid team data in ${file.name}`;
                             }
 
-                            const roundEvents = (data.events || []).map(e => {
-                                const eventType = e.type?.toLowerCase() || 'unknown';
-                                const eventEntry = {
-                                    type: eventType,
-                                    player: e.player?.username || "Unknown",
-                                    target: e.target || null,
-                                    headshot: e.headshot || false,
-                                    timeInSeconds: e.timeInSeconds || 0,
-                                    success: e.success || e.completed || false,
-                                    site: e.site || e.location || "Unknown",
-                                    team: e.teamId || teams[e.teamIndex]?.id || "Unknown",
-                                    matchId: null
-                                };
-                                
-                                matchData.events.push({
-                                    ...eventEntry,
-                                    map: matchData.maps[mapKey].mapName,
-                                    round: roundNumber
-                                });
-
-                                return eventEntry;
-                            });
+                            const winningTeam = teams.find(t => t.won);
+                            if (winningTeam && userTeamId && opponentTeamId) {
+                                if (winningTeam.id === userTeamId || winningTeam.name === userTeamId) {
+                                    matchData.maps[mapKey].teamScore++;
+                                } else if (winningTeam.id === opponentTeamId || winningTeam.name === opponentTeamId) {
+                                    matchData.maps[mapKey].opponentScore++;
+                                }
+                            }
 
                             matchData.maps[mapKey].rounds[roundNumber] = {
                                 site: data.header?.site || "Unknown",
                                 spawn: data.header?.spawnInfo?.name || "Unknown",
-                                outcome: outcome || "unknown",
+                                outcome: winningTeam ? 
+                                    `${winningTeam.role} ${data.header?.site || "Unknown"}` : 
+                                    data.matchFeedback?.outcome || "unknown",
                                 players: (data.header?.players || []).map(player => ({
                                     name: player.username || "Unknown",
                                     operator: player.operator?.name || "Unknown",
                                     team: data.header?.teams?.[player.teamIndex]?.name || "Unknown"
                                 })),
-                                events: roundEvents,
+                                events: (data.events || []).map(e => {
+                                    const eventType = e.type?.toLowerCase() || 'unknown';
+                                    const eventEntry = {
+                                        map: matchData.maps[mapKey].mapName,
+                                        round: roundNumber,
+                                        type: eventType,
+                                        player: e.player?.username || "Unknown",
+                                        target: e.target || null,
+                                        headshot: e.headshot || false,
+                                        timeInSeconds: e.timeInSeconds || 0,
+                                        success: e.success || false,
+                                        site: e.site || "Unknown"
+                                    };
+                                    
+                                    if (['kill', 'plant', 'defuse'].includes(eventType)) {
+                                        matchEvents.push(eventEntry);
+                                        updateEventsDisplay();
+                                    }
+
+                                    return e;
+                                }),
                                 duration: data.header?.matchDuration || 0,
                                 timestamp: new Date(data.header?.timestamp || Date.now()).toISOString()
                             };
@@ -553,48 +456,17 @@
                     }
                 }
 
-                if (!processingState.paused) {
-                    if (!validateMatchData(matchData)) {
-                        throw new Error("Invalid match data structure");
-                    }
+                const matchRef = db.ref(`teams/${teamId}/matches`).push();
+                await matchRef.set(matchData);
+                output.textContent += `\n🎉 Match saved! ID: ${matchRef.key}`;
 
-                    const matchRef = db.ref(`matches_pro`).push();
-                    const matchId = matchRef.key;
-                    const eventsWithIds = matchData.events.map(event => ({
-                        ...event,
-                        matchId
-                    }));
-
-                    const saveData = JSON.parse(JSON.stringify({
-                        ...matchData,
-                        events: eventsWithIds
-                    }));
-                    
-                    try {
-                        await matchRef.set(saveData);
-                        await db.ref().update(
-                            eventsWithIds.reduce((updates, event, index) => {
-                                updates[`events/${matchId}_${index}`] = event;
-                                return updates;
-                            }, {})
-                        );
-
-                        output.textContent += `\n🎉 Match saved! ID: ${matchId}`;
-                        updateEventsDisplay();
-                        
-                        opponentInput.value = '';
-                        document.getElementById('mapInputs').innerHTML = `
-                            <div class="map-upload">
-                                <label>Upload Folder for Map 1:</label>
-                                <input type="file" class="folder-upload" webkitdirectory directory multiple>
-                            </div>`;
-                        mapCounter = 1;
-                    } catch (firebaseError) {
-                        console.error('Firebase save error:', firebaseError);
-                        showError(`Save failed: ${firebaseError.message}`);
-                        output.textContent += `\n❌ Failed to save match: ${firebaseError.message}`;
-                    }
-                }
+                opponentInput.value = '';
+                document.getElementById('mapInputs').innerHTML = `
+                    <div class="map-upload">
+                        <label>Upload Folder for Map 1:</label>
+                        <input type="file" class="folder-upload" webkitdirectory directory multiple>
+                    </div>`;
+                mapCounter = 1;
 
             } catch (error) {
                 console.error("Error:", error);
@@ -602,28 +474,6 @@
                 output.textContent += `\n❌ Error: ${error.message}`;
                 opponentInput.value = currentOpponent;
             }
-        }
-
-        function showTeamSelection(teams) {
-            const teamOptions = document.getElementById('teamOptions');
-            teamOptions.innerHTML = teams.map(team => `
-                <div class="team-option" 
-                     onclick="selectTeam('${team.id}', '${team.name}')"
-                     data-teamid="${team.id}">
-                    ${team.name} (${team.role})
-                </div>
-            `).join('');
-            document.getElementById('teamSelection').style.display = 'block';
-        }
-
-        function selectTeam(teamId, teamName) {
-            selectedTeamId = teamId;
-            document.querySelectorAll('.team-option').forEach(opt => 
-                opt.classList.remove('selected'));
-            document.querySelector(`[data-teamid="${teamId}"]`).classList.add('selected');
-            document.getElementById('teamSelection').style.display = 'none';
-            processingState.paused = false;
-            submitReplayData();
         }
 
         function toggleRawData() {
@@ -649,58 +499,30 @@
         }
 
         function updateEventsDisplay() {
-            const accordion = document.getElementById('roundsAccordion');
-            accordion.innerHTML = '';
-            
-            Object.entries(matchData.maps).forEach(([mapKey, mapData]) => {
-                Object.entries(mapData.rounds).forEach(([roundNumber, roundData]) => {
-                    const roundDiv = document.createElement('div');
-                    roundDiv.className = 'round-event';
-                    roundDiv.innerHTML = `
-                        <div class="round-header" onclick="toggleRound(this)">
-                            <span>Map: ${mapData.mapName} - Round ${roundNumber}</span>
-                            <span class="toggle-icon">▼</span>
-                        </div>
-                        <div class="round-events">
-                            ${roundData.events.map(event => {
-                                const mins = Math.floor(event.timeInSeconds / 60);
-                                const secs = event.timeInSeconds % 60;
-                                const time = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-                                
-                                const teamRole = availableTeams.find(t => t.id === selectedTeamId)?.role?.toLowerCase();
-                                const teamContext = event.team === selectedTeamId 
-                                    ? `(${teamRole === 'attack' ? 'Attacking' : 'Defending'} Team)` 
-                                    : `(${teamRole === 'attack' ? 'Defending' : 'Attacking'} Team)`;
-
-                                let details = '';
-                                switch(event.type) {
-                                    case 'kill':
-                                        details = `${event.player} ${teamContext} killed ${event.target || 'unknown'} at ${event.site}${event.headshot ? ' (Headshot)' : ''}`;
-                                        break;
-                                    case 'plant':
-                                    case 'defuse':
-                                        const verb = event.type === 'plant' ? 'plant' : 'defuse';
-                                        const status = event.success ? 'successful' : 'failed';
-                                        details = `${event.player} ${teamContext} ${verb} ${status} at ${event.site}`;
-                                        break;
-                                    default:
-                                        details = `${event.player} ${teamContext} ${event.type}`;
-                                }
-                                
-                                return `<div class="event-item event-${event.type}">[${time}] ${details}</div>`;
-                            }).join('')}
-                        </div>
-                    `;
-                    accordion.appendChild(roundDiv);
-                });
-            });
-        }
-
-        function toggleRound(header) {
-            const roundDiv = header.parentElement;
-            const content = roundDiv.querySelector('.round-events');
-            content.classList.toggle('visible');
-            roundDiv.classList.toggle('toggled');
+            const eventsLog = document.getElementById('eventsLog');
+            eventsLog.innerHTML = matchEvents
+                .sort((a, b) => a.timeInSeconds - b.timeInSeconds)
+                .map(event => {
+                    const mins = Math.floor(event.timeInSeconds / 60);
+                    const secs = event.timeInSeconds % 60;
+                    const time = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                    
+                    let details = '';
+                    switch(event.type) {
+                        case 'kill':
+                            details = `${event.player} killed ${event.target || 'unknown'} at ${event.site}${event.headshot ? ' (Headshot)' : ''}`;
+                            break;
+                        case 'plant':
+                        case 'defuse':
+                            details = `${event.player} ${event.type} ${event.success ? 'successful' : 'failed'} at ${event.site}`;
+                            break;
+                        default:
+                            details = `${event.player} ${event.type}`;
+                    }
+                    
+                    return `<div class="event-item event-${event.type}">[${time}] ${details}</div>`;
+                })
+                .join('');
         }
 
         function toggleEvents() {
