@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Replay</title>
+    <title>Upload Match Replay</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -191,6 +191,20 @@
             measurementId: "G-TN7LJDJP3R"
         };
 
+        const ATTACK_OPS = new Set([
+            'Striker','Sledge','Thatcher','Ash','Thermite','Montagne','Twitch','Blitz','IQ',
+            'Fuze','Glaz','Buck','Blackbeard','Capitao','Hibana','Jackal','Ying','Zofia',
+            'Dokkaebi','Lion','Finka','Maverick','Nomad','Gridlock','Nokk','Amaru','Kali',
+            'Iana','Ace','Zero','Flores','Osa','Sens','Grim','Brava','Ram','Deimos','Rauora'
+        ]);
+
+        const DEFENSE_OPS = new Set([
+            'Sentry','Mute','Smoke','Castle','Pulse','Doc','Rook','Kapkan','Tachanka',
+            'Jäger','Bandit','Frost','Valkyrie','Caveira','Echo','Mira','Lesion','Ela',
+            'Vigil','Maestro','Alibi','Clash','Kaid','Mozzie','Warden','Goyo','Wamai','Oryx',
+            'Melusi','Aruni','Thunderbird','Thorn','Azami','Solis','Fenrir','Tubarao','Skopos'
+        ]);
+
         const app = firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
         const db = firebase.database();
@@ -205,6 +219,9 @@
         const go = new Go();
         let wasmReady = false;
         let rawReplayData = {};
+        let trackedPlayer = null;
+        let currentTrackedRole = null;
+        let roleChanges = [];
 
         function getRoundNumber(filename) {
             const match = filename.match(/R(\d+)\.rec/i);
@@ -370,6 +387,14 @@
             const currentOpponent = opponentInput.value.trim();
             output.textContent = '🚀 Starting upload process...\n';
 
+            // Tracking variables
+            let attackWins = 0;
+            let defenseWins = 0;
+            const roundOutcomes = [];
+            trackedPlayer = null;
+            currentTrackedRole = null;
+            roleChanges = [];
+
             try {
                 if (!wasmReady) throw new Error("Analysis engine still loading");
                 if (!teamId) throw new Error("Not authenticated");
@@ -380,14 +405,15 @@
                     opponent: currentOpponent,
                     teamId,
                     date: new Date().toISOString(),
-                    maps: {}
+                    maps: {},
+                    roleChanges: [],
+                    scoreSummary: {}
                 };
 
                 for (const [mapIndex, block] of uploadBlocks.entries()) {
                     const input = block.querySelector('input');
                     let files = [...input.files].filter(f => f.name.endsWith(".rec"));
                     
-                    // Sort files by round number
                     files = files.sort((a, b) => {
                         const aRound = getRoundNumber(a.name);
                         const bRound = getRoundNumber(b.name);
@@ -447,7 +473,7 @@
                                 matchData.maps[mapKey].mapName = headerMap || detectMapFromSiteAndSpawn(site, spawn) || "Unknown";
                             }
 
-                            // Team identification (first valid round)
+                            // Team identification
                             if (!userTeamId && teams.length >= 2) {
                                 userTeamId = teams[0]?.id || "Unknown";
                                 opponentTeamId = teams[1]?.id || "Unknown";
@@ -458,7 +484,7 @@
                                 output.textContent += `\nIdentified teams: ${teams[0]?.name || 'Unknown'} (Your Team) vs ${teams[1]?.name || 'Unknown'} (Opponent)`;
                             }
 
-                            // Score calculation using team IDs
+                            // Score calculation
                             const winningTeam = teams.find(t => t.won);
                             if (winningTeam && userTeamId && opponentTeamId) {
                                 if (winningTeam.id === userTeamId) {
@@ -466,6 +492,54 @@
                                 } else if (winningTeam.id === opponentTeamId) {
                                     matchData.maps[mapKey].opponentScore++;
                                 }
+                            }
+
+                            // Round outcome tracking
+                            const roundRole = winningTeam?.role || "Unknown";
+                            if (roundRole === "Attack") attackWins++;
+                            if (roundRole === "Defense") defenseWins++;
+                            
+                            roundOutcomes.push({
+                                round: roundNumber,
+                                winningRole: roundRole,
+                                attackingTeam: teams.find(t => t.role === "Attack")?.name || "Unknown",
+                                defendingTeam: teams.find(t => t.role === "Defense")?.name || "Unknown",
+                                score: {
+                                    attack: teams.find(t => t.role === "Attack")?.score || 0,
+                                    defense: teams.find(t => t.role === "Defense")?.score || 0
+                                }
+                            });
+
+                            // Operator role tracking
+                            const players = data.header?.players || [];
+                            if (!trackedPlayer && players.length > 0) {
+                                trackedPlayer = players[Math.floor(Math.random() * players.length)].username;
+                                output.textContent += `\n🎯 Tracking operator changes for: ${trackedPlayer}`;
+                            }
+
+                            const playerData = players.find(p => p.username === trackedPlayer);
+                            if (playerData) {
+                                const currentOp = playerData.operator?.name || "Unknown";
+                                const newRole = ATTACK_OPS.has(currentOp) ? 'Attack' :
+                                              DEFENSE_OPS.has(currentOp) ? 'Defense' : 
+                                              'Unknown';
+
+                                if (currentTrackedRole && newRole !== currentTrackedRole) {
+                                    roleChanges.push({
+                                        round: roundNumber,
+                                        from: currentTrackedRole,
+                                        to: newRole,
+                                        operator: currentOp
+                                    });
+                                    output.textContent += `\n🛡️➡️⚔️ Role change: ${currentTrackedRole} → ${newRole} (${currentOp})`;
+                                }
+                                currentTrackedRole = newRole;
+
+                                matchData.maps[mapKey].rounds[roundNumber].operatorTracking = {
+                                    player: trackedPlayer,
+                                    operator: currentOp,
+                                    role: newRole
+                                };
                             }
 
                             // Record round details
@@ -494,9 +568,28 @@
                     }
                 }
 
+                // Add tracking data to match record
+                matchData.roleChanges = roleChanges;
+                matchData.scoreSummary = {
+                    totalRounds: roundOutcomes.length,
+                    attackWins,
+                    defenseWins,
+                    finalScore: `${attackWins}-${defenseWins}`,
+                    roundOutcomes
+                };
+
                 const matchRef = db.ref(`teams/${teamId}/matches_pro`).push();
                 await matchRef.set(matchData);
                 output.textContent += `\n🎉 Match saved! ID: ${matchRef.key}`;
+
+                // Show summary
+                output.textContent += `\n\n🔍 Final Results:`;
+                output.textContent += `\n🔵 Attack Wins: ${attackWins}`;
+                output.textContent += `\n🛡️ Defense Wins: ${defenseWins}`;
+                output.textContent += `\n🔄 Role Changes: ${roleChanges.length}`;
+                roleChanges.forEach(change => {
+                    output.textContent += `\n• Round ${change.round}: ${change.from} → ${change.to} (${change.operator})`;
+                });
 
                 opponentInput.value = '';
                 document.getElementById('mapInputs').innerHTML = `
