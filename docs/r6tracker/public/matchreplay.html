@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Match Replay Upload</title>
+    <title>Upload</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -98,27 +98,11 @@
             color: white;
         }
 
-        .map-upload {
-            margin-bottom: 2rem;
-            padding: 1rem;
-            background: #2d2d2d;
-            border-radius: 4px;
-        }
-
         .form-actions {
             margin-top: 1rem;
             display: flex;
             gap: 1rem;
             flex-wrap: wrap;
-        }
-
-        .raw-data-toggle {
-            margin: 1rem 0;
-            background: #333;
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
-            cursor: pointer;
-            display: inline-block;
         }
 
         .raw-data-content {
@@ -210,7 +194,7 @@
         <div class="form-actions">
             <button class="btn btn-success" onclick="submitReplayData()">🚀 Upload Match</button>
             <button class="btn btn-primary" onclick="downloadJSON()">💾 Download JSON</button>
-            <button class="raw-data-toggle" onclick="toggleEvents()">📜 Show Events</button>
+            <button class="btn btn-secondary" onclick="toggleEvents()">📜 Show Events</button>
         </div>
 
         <div id="outputLog" class="output-log"></div>
@@ -308,44 +292,51 @@
             try {
                 if (!wasmReady) throw new Error("Analysis engine not ready");
                 if (!teamId) throw new Error("Not authenticated");
+                if (!matchData.opponent) throw new Error("Opponent name required");
 
                 const input = document.querySelector('.folder-upload');
                 const files = [...input.files].filter(f => f.name.endsWith(".rec"));
 
                 for (const file of files) {
-                    output.textContent += `\nProcessing ${file.name}...`;
                     const roundNumber = getRoundNumber(file.name);
-                    if (!roundNumber) continue;
-
-                    const arrayBuffer = await file.arrayBuffer();
-                    const uint8Array = new Uint8Array(arrayBuffer);
-                    
-                    const result = await window.dissectReplay(uint8Array);
-                    const parsedData = JSON.parse(result);
-
-                    // Process events
-                    const roundKey = `round_${roundNumber}`;
-                    matchData.rounds[roundKey] = {
-                        duration: parsedData.duration || 0,
-                        events: {}
-                    };
-
-                    if (parsedData.events) {
-                        parsedData.events.forEach((event, index) => {
-                            matchData.rounds[roundKey].events[`event_${index}`] = {
-                                type: {
-                                    id: event.type?.id || 0,
-                                    name: event.type?.name || "Unknown"
-                                },
-                                headshot: event.headshot || false,
-                                target: event.target || "Unknown",
-                                timeInSeconds: event.timeInSeconds || 0,
-                                username: event.player?.username || "Unknown"
-                            };
-                        });
+                    if (!roundNumber) {
+                        output.textContent += `\n⚠️ Invalid filename: ${file.name} - skipping`;
+                        continue;
                     }
 
-                    output.textContent += ` ✔️`;
+                    output.textContent += `\nProcessing ${file.name}...`;
+                    
+                    try {
+                        const arrayBuffer = await file.arrayBuffer();
+                        const uint8Array = new Uint8Array(arrayBuffer);
+                        const result = await window.dissectReplay(uint8Array);
+                        const parsedData = JSON.parse(result);
+
+                        const roundKey = `round_${roundNumber}`;
+                        matchData.rounds[roundKey] = {
+                            duration: parsedData.duration || 0,
+                            events: {}
+                        };
+
+                        if (parsedData.events) {
+                            parsedData.events.forEach((event, index) => {
+                                matchData.rounds[roundKey].events[`event_${index}`] = {
+                                    type: event.type?.name || "Unknown",
+                                    player: event.player?.username || "Unknown",
+                                    target: event.target || "Unknown",
+                                    timeInSeconds: event.timeInSeconds || 0,
+                                    headshot: event.headshot || false,
+                                    site: event.site || "Unknown"
+                                };
+                            });
+                        }
+
+                        output.textContent += ` ✔️`;
+
+                    } catch (error) {
+                        console.error(`Error processing ${file.name}:`, error);
+                        output.textContent += `\n❌ Error in ${file.name}: ${error.message}`;
+                    }
                 }
 
                 const matchRef = db.ref("matches").push();
@@ -375,28 +366,30 @@
                 
                 roundDiv.innerHTML = `
                     <div class="round-header" onclick="toggleRound(this)">
-                        <span>Round ${roundNumber}</span>
+                        <span>Round ${roundNumber} (${formatTime(roundData.duration)})</span>
                         <span class="toggle-icon">▼</span>
                     </div>
                     <div class="round-events">
-                        ${Object.values(roundData.events).map(event => {
-                            const mins = Math.floor(event.timeInSeconds / 60);
-                            const secs = event.timeInSeconds % 60;
-                            const time = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-                            
-                            return `
-                                <div class="event-item event-${event.type.name.toLowerCase()}">
-                                    [${time}] ${event.username}
-                                    ${event.type.name} 
-                                    ${event.target ? `→ ${event.target}` : ''}
-                                    ${event.headshot ? '(HS)' : ''}
-                                </div>
-                            `;
-                        }).join('')}
+                        ${Object.values(roundData.events).map(event => `
+                            <div class="event-item event-${event.type.toLowerCase()}">
+                                [${formatTime(event.timeInSeconds)}] 
+                                ${event.player}
+                                ${event.type} 
+                                ${event.target ? `→ ${event.target}` : ''}
+                                ${event.headshot ? '(HS)' : ''}
+                                ${event.site ? `@ ${event.site}` : ''}
+                            </div>
+                        `).join('')}
                     </div>
                 `;
                 accordion.appendChild(roundDiv);
             });
+        }
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
         }
 
         function toggleRound(header) {
@@ -415,7 +408,7 @@
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `match_${new Date().toISOString()}.json`;
+                a.download = `match_${matchData.opponent}_${new Date().toISOString()}.json`;
                 a.click();
                 URL.revokeObjectURL(url);
             } catch (error) {
