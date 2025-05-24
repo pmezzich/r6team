@@ -271,7 +271,7 @@
                             const result = await Promise.race([
                                 window.dissectReplay(uint8Array),
                                 new Promise((_, reject) => 
-                                    setTimeout(() => reject(new Error("Processing timeout (5s)"), 5000)
+                                    setTimeout(() => reject(new Error("Processing timeout (5s)")), 5000)
                                 )
                             ]);
                             
