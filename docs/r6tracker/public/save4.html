@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Uploadfgjh76</title>
+    <title>Upload Match Replay</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -136,6 +136,21 @@
             display: block;
         }
 
+        .events-content {
+            display: none;
+            background: #1a1a1a;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .events-content.visible {
+            display: block;
+        }
+
         .event-item {
             padding: 0.5rem;
             margin: 0.25rem 0;
@@ -183,13 +198,13 @@
         <div class="form-actions">
             <button class="btn btn-secondary" onclick="addMapUpload()">➕ Add Map</button>
             <button class="btn btn-success" onclick="submitReplayData()">🚀 Upload Match</button>
-            <button class="raw-data-toggle" onclick="toggleRawData()">📄 Toggle Raw Data</button>
-            <button class="raw-data-toggle" onclick="toggleEvents()">📜 Show Events</button>
+            <button class="btn btn-secondary" onclick="toggleRawData()">📄 Toggle Raw Data</button>
+            <button class="btn btn-secondary" onclick="toggleEvents()">📜 Toggle Events</button>
         </div>
 
         <div id="outputLog" class="output-log"></div>
         <div id="rawDataDump" class="raw-data-content"></div>
-        <div id="eventsSection" class="raw-data-content">
+        <div id="eventsSection" class="events-content">
             <h3 style="color: #7C3AED; margin-bottom: 0.5rem;">Match Events Timeline</h3>
             <div id="eventsLog" class="output-log" style="max-height: 600px;"></div>
         </div>
@@ -623,6 +638,7 @@
         function toggleEvents() {
             const eventsSection = document.getElementById('eventsSection');
             eventsSection.classList.toggle('visible');
+            eventsSection.style.display = eventsSection.classList.contains('visible') ? 'block' : 'none';
         }
 
         function showError(message) {
