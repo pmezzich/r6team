@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Upload Match Replay</title>
+    <title>Upload</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -412,8 +412,12 @@
                              const opponentTeamId = matchData.maps[mapKey].opponentTeamId;
                              const winningTeam = teams.find(t => t.won);
                              if (winningTeam) {
-                               if (winningTeam.id === userTeamId || winningTeam.name === userTeamId) {yourTeamWins++};
-                               else if (winningTeam.id === opponentTeamId || winningTeam.name === opponentTeamId) {opponentWins++};
+                              if (winningTeam.id === userTeamId || winningTeam.name === userTeamId) {
+                                  yourTeamWins++;
+                              } else if (winningTeam.id === opponentTeamId || winningTeam.name === opponentTeamId) {
+                                  opponentWins++;
+                              }
+
                              if (winningTeam.role === "Attack") {
                                if (winningTeam.id === userTeamId || winningTeam.name === userTeamId) {yourAttackWins++};
                                else {opponentAttackWins++};
