@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Uy43</title>
+    <title>Uploadfgjh76</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -368,8 +368,6 @@
                     if (files.length === 0) continue;
 
                     const mapKey = `map_${mapIndex}`;
-                    let userTeamId = null;
-                    let opponentTeamId = null;
                     
                     matchData.maps[mapKey] = {
                         mapName: "Unknown",
@@ -410,9 +408,10 @@
                             };
 
                             if (matchData.maps[mapKey].mapName === "Unknown") {
-                                matchData.maps[mapKey].mapName = 
-                                    data.header?.map?.name?.replace(/([a-z])([A-Z])/g, '$1 $2') || 
-                                    "Unknown";
+                                const headerMap = data.header?.map?.name;
+                                if (headerMap) {
+                                    matchData.maps[mapKey].mapName = headerMap.replace(/([a-z])([A-Z])/g, '$1 $2');
+                                }
                             }
 
                             let yourTeamRole = "Unknown";
@@ -441,29 +440,6 @@
 
                                 if (team.won) winningTeam = team;
                             });
-
-                            if (teams.length >= 2) {
-                                const team1 = teams[0];
-                                const team2 = teams[1];
-                                
-                                if (!userTeamId) {
-                                    userTeamId = team1.id || team1.name;
-                                    opponentTeamId = team2.id || team2.name;
-                                    
-                                    matchData.maps[mapKey].userTeamId = userTeamId;
-                                    matchData.maps[mapKey].opponentTeamId = opponentTeamId;
-                                    
-                                    output.textContent += `\nIdentified teams: ${team1.name || 'Unknown'} (Your Team) vs ${team2.name || 'Unknown'} (Opponent)`;
-                                }
-                            }
-
-                            if (winningTeam && userTeamId && opponentTeamId) {
-                                if (winningTeam.id === userTeamId || winningTeam.name === userTeamId) {
-                                    matchData.maps[mapKey].teamScore++;
-                                } else if (winningTeam.id === opponentTeamId || winningTeam.name === opponentTeamId) {
-                                    matchData.maps[mapKey].opponentScore++;
-                                }
-                            }
 
                             matchData.maps[mapKey].rounds[roundNumber] = {
                                 site: data.header?.site || "Unknown",
@@ -550,6 +526,9 @@
                             output.textContent += `\n❌ Error in ${file.name}: ${error.message}`;
                         }
                     }
+
+                    matchData.maps[mapKey].teamScore = yourTeamWins;
+                    matchData.maps[mapKey].opponentScore = opponentWins;
                 }
 
                 matchData.roleChanges = roleChanges;
@@ -564,7 +543,7 @@
                     roundOutcomes
                 };
 
-                const matchRef = db.ref(`teams/${teamId}/matches`).push();
+                const matchRef = db.ref(`teams/${teamId}/matches_pro`).push();
                 await matchRef.set(matchData);
                 output.textContent += `\n🎉 Match saved! ID: ${matchRef.key}`;
 
