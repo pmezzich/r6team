@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script>window.process = window.process || { env: {} };</script>
-    <title>Upload Match Replay</title>
+    <title>Upload</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -32,6 +32,8 @@
         .event-kill { border-left: 4px solid #EF4444; }
         .event-plant { border-left: 4px solid #10B981; }
         .event-defuse { border-left: 4px solid #3B82F6; }
+        .date-picker { margin: 1rem 0; display: flex; align-items: center; gap: 1rem; }
+        .date-input { background: #2d2d2d; border: 1px solid #404040; color: white; padding: 0.5rem; border-radius: 4px; }
     </style>
 </head>
 <body>
@@ -51,22 +53,31 @@
                 <button class="btn btn-danger" onclick="logout()">Logout</button>
             </div>
         </div>
+
+        <div class="date-picker">
+            <label>Scrim Date:</label>
+            <input type="date" id="scrimDate" class="date-input" required>
+        </div>
+
         <div class="form-group">
             <label>Opponent Team Name:</label>
             <input type="text" id="opponentInput" class="form-input" required>
         </div>
+
         <div id="mapInputs">
             <div class="map-upload">
                 <label>Upload Folder for Map 1:</label>
                 <input type="file" class="folder-upload" webkitdirectory directory multiple>
             </div>
         </div>
+
         <div class="form-actions">
             <button class="btn btn-secondary" onclick="addMapUpload()">➕ Add Map</button>
             <button class="btn btn-success" onclick="submitReplayData()">🚀 Upload Match</button>
             <button class="raw-data-toggle" onclick="toggleRawData()">📄 Toggle Raw Data</button>
             <button class="raw-data-toggle" onclick="toggleEvents()">📜 Show Events</button>
         </div>
+
         <div id="outputLog" class="output-log"></div>
         <div id="rawDataDump" class="raw-data-content"></div>
         <div id="eventsSection" class="raw-data-content">
@@ -74,7 +85,11 @@
             <div id="eventsLog" class="output-log" style="max-height: 600px;"></div>
         </div>
     </div>
+
     <script>
+        // Initialize date picker with today's date
+        document.getElementById('scrimDate').value = new Date().toISOString().split('T')[0];
+
         const firebaseConfig = {
             apiKey: "AIzaSyBRrm0ZrKfhrBWa7A0VghOz82ufJvHeJqI",
             authDomain: "r6stattracker.firebaseapp.com",
@@ -118,6 +133,7 @@
         let trackedPlayer = null;
         let currentTrackedRole = null;
         let roleChanges = [];
+        let matchEvents = [];
 
         function getRoundNumber(filename) {
             const match = filename.match(/R(\d+)\.rec/i);
@@ -201,7 +217,9 @@
         async function submitReplayData() {
             const output = document.getElementById('outputLog');
             const opponentInput = document.getElementById('opponentInput');
+            const scrimDate = document.getElementById('scrimDate').value;
             rawReplayData = {};
+            matchEvents = [];
             
             const currentOpponent = opponentInput.value.trim();
             output.textContent = '🚀 Starting upload process...\n';
@@ -226,10 +244,11 @@
                 const matchData = {
                     opponent: currentOpponent,
                     teamId,
-                    date: new Date().toISOString(),
+                    date: scrimDate,
                     maps: {},
                     roleChanges: [],
-                    scoreSummary: {}
+                    scoreSummary: {},
+                    events: []
                 };
 
                 for (const [mapIndex, block] of uploadBlocks.entries()) {
@@ -318,6 +337,28 @@
                                 if (team.won) winningTeam = team;
                             });
 
+                            // Event processing
+                            const events = (data.events || []).map(e => {
+                                const eventType = e.type?.toLowerCase() || 'unknown';
+                                const eventEntry = {
+                                    map: matchData.maps[mapKey].mapName,
+                                    round: roundNumber,
+                                    type: eventType,
+                                    player: e.player?.username || "Unknown",
+                                    target: e.target || null,
+                                    headshot: e.headshot || false,
+                                    timeInSeconds: e.timeInSeconds || 0,
+                                    success: e.success || false,
+                                    site: e.site || "Unknown"
+                                };
+                                
+                                if (['kill', 'plant', 'defuse'].includes(eventType)) {
+                                    matchData.events.push(eventEntry);
+                                    updateEventsDisplay();
+                                }
+                                return eventEntry;
+                            });
+
                             matchData.maps[mapKey].rounds[roundNumber] = {
                                 site: data.header?.site || "Unknown",
                                 spawn: data.header?.spawnInfo?.name || "Unknown",
@@ -329,7 +370,7 @@
                                     operator: player.operator?.name || "Unknown",
                                     team: data.header?.teams?.[player.teamIndex]?.name || "Unknown"
                                 })),
-                                events: data.matchFeedback || [],
+                                events: events,
                                 duration: data.header?.matchDuration || 0,
                                 timestamp: new Date(data.header?.timestamp || Date.now()).toISOString(),
                                 yourRole: yourTeamRole,
@@ -448,6 +489,33 @@
                 });
                 dumpElement.textContent = formattedData;
             }
+        }
+
+        function updateEventsDisplay() {
+            const eventsLog = document.getElementById('eventsLog');
+            eventsLog.innerHTML = matchEvents
+                .sort((a, b) => a.timeInSeconds - b.timeInSeconds)
+                .map(event => {
+                    const mins = Math.floor(event.timeInSeconds / 60);
+                    const secs = event.timeInSeconds % 60;
+                    const time = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                    
+                    let details = '';
+                    switch(event.type) {
+                        case 'kill':
+                            details = `${event.player} killed ${event.target || 'unknown'} at ${event.site}${event.headshot ? ' (Headshot)' : ''}`;
+                            break;
+                        case 'plant':
+                        case 'defuse':
+                            details = `${event.player} ${event.type} ${event.success ? 'successful' : 'failed'} at ${event.site}`;
+                            break;
+                        default:
+                            details = `${event.player} ${event.type}`;
+                    }
+                    
+                    return `<div class="event-item event-${event.type}">[${time}] ${details}</div>`;
+                })
+                .join('');
         }
 
         function toggleEvents() {
