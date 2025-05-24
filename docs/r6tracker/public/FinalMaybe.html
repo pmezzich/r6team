@@ -6,7 +6,7 @@
     <script>
         window.process = window.process || { env: {} };
     </script>
-    <title>Upload</title>
+    <title>Udwdwad</title>
     <link rel="stylesheet" href="../styles/styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
@@ -417,11 +417,14 @@
                               } else if (winningTeam.id === opponentTeamId || winningTeam.name === opponentTeamId) {
                                   opponentWins++;
                               }
+                              if (winningTeam.role === "Attack") {
+                                  if (winningTeam.id === userTeamId || winningTeam.name === userTeamId) {
+                                      yourAttackWins++;
+                                  } else {
+                                      opponentAttackWins++;
+                                  }
+                              }
 
-                             if (winningTeam.role === "Attack") {
-                               if (winningTeam.id === userTeamId || winningTeam.name === userTeamId) {yourAttackWins++};
-                               else {opponentAttackWins++};
-                           }
                           if (winningTeam.role === "Defense") {
                             if (winningTeam.id === userTeamId || winningTeam.name === userTeamId) {yourDefenseWins++};
                             else {opponentDefenseWins++};
