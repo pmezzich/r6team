@@ -426,13 +426,13 @@
                               }
 
                           if (winningTeam.role === "Defense") {
-                            if (winningTeam.id === userTeamId || winningTeam.name === userTeamId) {yourDefenseWins++};
-                            else {opponentDefenseWins++};
-                        }
-                    }
-                }
-
-
+                              if (winningTeam.id === userTeamId || winningTeam.name === userTeamId) {
+                                  yourDefenseWins++;
+                              } else {
+                                  opponentDefenseWins++;
+                              }
+                          }
+                                 
                             matchData.maps[mapKey].rounds[roundNumber] = {
                                 site: data.header?.site || "Unknown",
                                 spawn: data.header?.spawnInfo?.name || "Unknown",
