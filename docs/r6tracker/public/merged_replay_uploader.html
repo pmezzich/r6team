@@ -75,7 +75,392 @@
         </div>
     </div>
     <script>
-    // JavaScript inserted separately
+        const firebaseConfig = {
+            apiKey: "AIzaSyBRrm0ZrKfhrBWa7A0VghOz82ufJvHeJqI",
+            authDomain: "r6stattracker.firebaseapp.com",
+            databaseURL: "https://r6stattracker-default-rtdb.firebaseio.com",
+            projectId: "r6stattracker",
+            storageBucket: "r6stattracker.appspot.com",
+            messagingSenderId: "575541861129",
+            appId: "1:575541861129:web:28682f4fc01279e46651d8",
+            measurementId: "G-TN7LJDJP3R"
+        };
+
+        const ATTACK_OPS = new Set([
+            'Striker','Sledge','Thatcher','Ash','Thermite','Montagne','Twitch','Blitz','IQ',
+            'Fuze','Glaz','Buck','Blackbeard','Capitao','Hibana','Jackal','Ying','Zofia',
+            'Dokkaebi','Lion','Finka','Maverick','Nomad','Gridlock','Nokk','Amaru','Kali',
+            'Iana','Ace','Zero','Flores','Osa','Sens','Grim','Brava','Ram','Deimos','Rauora'
+        ]);
+
+        const DEFENSE_OPS = new Set([
+            'Sentry','Mute','Smoke','Castle','Pulse','Doc','Rook','Kapkan','Tachanka',
+            'Jäger','Bandit','Frost','Valkyrie','Caveira','Echo','Mira','Lesion','Ela',
+            'Vigil','Maestro','Alibi','Clash','Kaid','Mozzie','Warden','Goyo','Wamai','Oryx',
+            'Melusi','Aruni','Thunderbird','Thorn','Azami','Solis','Fenrir','Tubarao','Skopos'
+        ]);
+
+        const app = firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.database();
+
+        if (window.location.hostname === "localhost") {
+            console.log("Using Firebase emulators");
+            auth.useEmulator("http://localhost:9099");
+            db.useEmulator("localhost", 9000);
+        }
+
+        let teamId = null;
+        let userTeamName = "";
+        const go = new Go();
+        let wasmReady = false;
+        let rawReplayData = {};
+        let trackedPlayer = null;
+        let currentTrackedRole = null;
+        let roleChanges = [];
+
+        function getRoundNumber(filename) {
+            const match = filename.match(/R(\d+)\.rec/i);
+            return match ? parseInt(match[1]) : null;
+        }
+
+        function initializeWASM() {
+            WebAssembly.instantiateStreaming(fetch("../public/r6-dissect.wasm"), go.importObject)
+                .then(result => {
+                    go.run(result.instance);
+                    wasmReady = true;
+                    console.log("WASM module loaded successfully");
+                })
+                .catch(async error => {
+                    console.error("WASM initialization failed:", error);
+                    showError("Failed to load analysis engine. Retrying...");
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    initializeWASM();
+                });
+        }
+        initializeWASM();
+
+        auth.onAuthStateChanged(async (user) => {
+            const loginSection = document.getElementById('login');
+            const uploadSection = document.getElementById('replayUploader');
+            const errorMessage = document.getElementById('errorMessage');
+            
+            errorMessage.style.display = 'none';
+            
+            if (user) {
+                try {
+                    loginSection.style.display = "none";
+                    uploadSection.style.display = "block";
+                    
+                    const teamSnapshot = await db.ref(`users/${user.uid}/teamId`).get();
+                    if (!teamSnapshot.exists()) throw new Error("No team association");
+                    teamId = teamSnapshot.val();
+
+                    const teamNameSnapshot = await db.ref(`teams/${teamId}/info/teamName`).get();
+                    userTeamName = teamNameSnapshot.val();
+                    document.getElementById('teamName').textContent = userTeamName;
+                } catch (error) {
+                    showError(`Error: ${error.message}`);
+                    auth.signOut();
+                }
+            } else {
+                loginSection.style.display = "block";
+                uploadSection.style.display = "none";
+                teamId = null;
+                userTeamName = "";
+            }
+        });
+
+        async function login() {
+            const email = document.getElementById("email").value;
+            const password = document.getElementById("password").value;
+            
+            try {
+                await auth.signInWithEmailAndPassword(email, password);
+            } catch (error) {
+                showError(`Login failed: ${error.message}`);
+            }
+        }
+
+        function logout() {
+            auth.signOut();
+        }
+
+        let mapCounter = 1;
+        function addMapUpload() {
+            mapCounter++;
+            const container = document.createElement('div');
+            container.className = 'map-upload';
+            container.innerHTML = `
+                <label>Upload Folder for Map ${mapCounter}:</label>
+                <input type="file" class="folder-upload" webkitdirectory directory multiple>
+            `;
+            document.getElementById('mapInputs').appendChild(container);
+        }
+
+        async function submitReplayData() {
+            const output = document.getElementById('outputLog');
+            const opponentInput = document.getElementById('opponentInput');
+            rawReplayData = {};
+            
+            const currentOpponent = opponentInput.value.trim();
+            output.textContent = '🚀 Starting upload process...\n';
+
+            let yourAttackWins = 0;
+            let yourDefenseWins = 0;
+            let opponentAttackWins = 0;
+            let opponentDefenseWins = 0;
+            let yourTeamWins = 0;
+            let opponentWins = 0;
+            const roundOutcomes = [];
+            trackedPlayer = null;
+            currentTrackedRole = null;
+            roleChanges = [];
+
+            try {
+                if (!wasmReady) throw new Error("Analysis engine still loading");
+                if (!teamId) throw new Error("Not authenticated");
+                if (!currentOpponent) throw new Error("Opponent name required");
+
+                const uploadBlocks = document.querySelectorAll('.map-upload');
+                const matchData = {
+                    opponent: currentOpponent,
+                    teamId,
+                    date: new Date().toISOString(),
+                    maps: {},
+                    roleChanges: [],
+                    scoreSummary: {}
+                };
+
+                for (const [mapIndex, block] of uploadBlocks.entries()) {
+                    const input = block.querySelector('input');
+                    let files = [...input.files].filter(f => f.name.endsWith(".rec"));
+                    
+                    files = files.sort((a, b) => {
+                        const aRound = getRoundNumber(a.name);
+                        const bRound = getRoundNumber(b.name);
+                        return aRound - bRound;
+                    });
+
+                    if (files.length === 0) continue;
+
+                    const mapKey = `map_${mapIndex}`;
+                    
+                    matchData.maps[mapKey] = {
+                        mapName: "Unknown",
+                        folderName: files[0]?.webkitRelativePath?.split("/")[0] || `Map_${mapIndex+1}`,
+                        rounds: {},
+                        teamScore: 0,
+                        opponentScore: 0,
+                        userTeamId: "Unknown",
+                        opponentTeamId: "Unknown"
+                    };
+
+                    for (const [fileIndex, file] of files.entries()) {
+                        const roundNumber = getRoundNumber(file.name);
+                        if (!roundNumber) {
+                            output.textContent += `\n⚠️ Invalid filename: ${file.name} - skipping`;
+                            continue;
+                        }
+
+                        try {
+                            output.textContent += `\nProcessing ${file.name}...`;
+                            const arrayBuffer = await file.arrayBuffer();
+                            const uint8Array = new Uint8Array(arrayBuffer);
+                            
+                            const result = await Promise.race([
+                                window.dissectReplay(uint8Array),
+                                new Promise((_, reject) => 
+                                    setTimeout(() => reject(new Error("Processing timeout (5s)"), 5000)
+                                )
+                            ]);
+                            
+                            const data = JSON.parse(result);
+                            const teams = data.header?.teams || [];
+
+                            rawReplayData[file.name] = {
+                                fileName: file.name,
+                                processedData: data,
+                                rawData: result
+                            };
+
+                            if (matchData.maps[mapKey].mapName === "Unknown") {
+                                const headerMap = data.header?.map?.name;
+                                if (headerMap) {
+                                    matchData.maps[mapKey].mapName = headerMap.replace(/([a-z])([A-Z])/g, '$1 $2');
+                                }
+                            }
+
+                            let yourTeamRole = "Unknown";
+                            let opponentTeamRole = "Unknown";
+                            let winningTeam = null;
+
+                            teams.forEach(team => {
+                                const replayTeamName = team.name.trim().toLowerCase();
+                                const storedUserTeamName = userTeamName.trim().toLowerCase();
+
+                                if (replayTeamName === storedUserTeamName) {
+                                    yourTeamRole = team.role;
+                                    if (team.won) {
+                                        yourTeamWins++;
+                                        if (team.role === "Attack") yourAttackWins++;
+                                        if (team.role === "Defense") yourDefenseWins++;
+                                    }
+                                } else {
+                                    opponentTeamRole = team.role;
+                                    if (team.won) {
+                                        opponentWins++;
+                                        if (team.role === "Attack") opponentAttackWins++;
+                                        if (team.role === "Defense") opponentDefenseWins++;
+                                    }
+                                }
+
+                                if (team.won) winningTeam = team;
+                            });
+
+                            matchData.maps[mapKey].rounds[roundNumber] = {
+                                site: data.header?.site || "Unknown",
+                                spawn: data.header?.spawnInfo?.name || "Unknown",
+                                outcome: winningTeam ? 
+                                    `${winningTeam.role} ${data.header?.site || "Unknown"}` : 
+                                    data.matchFeedback?.outcome || "unknown",
+                                players: (data.header?.players || []).map(player => ({
+                                    name: player.username || "Unknown",
+                                    operator: player.operator?.name || "Unknown",
+                                    team: data.header?.teams?.[player.teamIndex]?.name || "Unknown"
+                                })),
+                                events: data.matchFeedback || [],
+                                duration: data.header?.matchDuration || 0,
+                                timestamp: new Date(data.header?.timestamp || Date.now()).toISOString(),
+                                yourRole: yourTeamRole,
+                                opponentRole: opponentTeamRole
+                            };
+
+                            roundOutcomes.push({
+                                round: roundNumber,
+                                yourScore: yourTeamWins,
+                                opponentScore: opponentWins,
+                                yourRole: yourTeamRole,
+                                opponentRole: opponentTeamRole,
+                                winner: winningTeam?.name || "Unknown"
+                            });
+
+                            const players = data.header?.players || [];
+                            if (!trackedPlayer && players.length > 0) {
+                                trackedPlayer = players[Math.floor(Math.random() * players.length)].username;
+                                output.textContent += `\n🎯 Tracking operator changes for: ${trackedPlayer}`;
+                            }
+
+                            const playerData = players.find(p => p.username === trackedPlayer);
+                            if (playerData) {
+                                const currentOp = playerData.operator?.name || "Unknown";
+                                const newRole = ATTACK_OPS.has(currentOp) ? 'Attack' :
+                                              DEFENSE_OPS.has(currentOp) ? 'Defense' : 
+                                              'Unknown';
+
+                                if (currentTrackedRole && newRole !== currentTrackedRole) {
+                                    roleChanges.push({
+                                        round: roundNumber,
+                                        from: currentTrackedRole,
+                                        to: newRole,
+                                        operator: currentOp
+                                    });
+                                    output.textContent += `\n🛡️➡️⚔️ Role change: ${currentTrackedRole} → ${newRole} (${currentOp})`;
+                                }
+                                currentTrackedRole = newRole;
+
+                                matchData.maps[mapKey].rounds[roundNumber].operatorTracking = {
+                                    player: trackedPlayer,
+                                    operator: currentOp,
+                                    role: newRole
+                                };
+                            }
+
+                            output.textContent += ` ✔️`;
+
+                        } catch (error) {
+                            console.error(`Error processing ${file.name}:`, error);
+                            output.textContent += `\n❌ Error in ${file.name}: ${error.message}`;
+                        }
+                    }
+
+                    matchData.maps[mapKey].teamScore = yourTeamWins;
+                    matchData.maps[mapKey].opponentScore = opponentWins;
+                }
+
+                matchData.roleChanges = roleChanges;
+                matchData.scoreSummary = {
+                    yourTeam: yourTeamWins,
+                    opponent: opponentWins,
+                    yourAttackWins,
+                    yourDefenseWins,
+                    opponentAttackWins,
+                    opponentDefenseWins,
+                    finalScore: `${yourTeamWins}-${opponentWins}`,
+                    roundOutcomes
+                };
+
+                const matchRef = db.ref(`teams/${teamId}/matches_pro`).push();
+                await matchRef.set(matchData);
+                output.textContent += `\n🎉 Match saved! ID: ${matchRef.key}`;
+
+                output.textContent += `\n\n🔍 Final Results:`;
+                output.textContent += `\n🔵 Your Team: ${yourTeamWins} (Attack: ${yourAttackWins}, Defense: ${yourDefenseWins})`;
+                output.textContent += `\n🛡️ Opponents: ${opponentWins} (Attack: ${opponentAttackWins}, Defense: ${opponentDefenseWins})`;
+                output.textContent += `\n🔄 Role Changes: ${roleChanges.length}`;
+                roleChanges.forEach(change => {
+                    output.textContent += `\n• Round ${change.round}: ${change.from} → ${change.to} (${change.operator})`;
+                });
+
+                opponentInput.value = '';
+                document.getElementById('mapInputs').innerHTML = `
+                    <div class="map-upload">
+                        <label>Upload Folder for Map 1:</label>
+                        <input type="file" class="folder-upload" webkitdirectory directory multiple>
+                    </div>`;
+                mapCounter = 1;
+
+            } catch (error) {
+                console.error("Error:", error);
+                showError(error.message);
+                output.textContent += `\n❌ Error: ${error.message}`;
+                opponentInput.value = currentOpponent;
+            }
+        }
+
+        function toggleRawData() {
+            const dumpElement = document.getElementById('rawDataDump');
+            dumpElement.classList.toggle('visible');
+            
+            if (dumpElement.classList.contains('visible')) {
+                let formattedData = "=== Raw Replay Data ===\n\n";
+                Object.values(rawReplayData).forEach(fileData => {
+                    formattedData += `File: ${fileData.fileName}\n`;
+                    if (fileData.error) {
+                        formattedData += `❌ Error: ${fileData.error}\n\n`;
+                        return;
+                    }
+                    formattedData += "Processed Data:\n" + 
+                        JSON.stringify(fileData.processedData, null, 2) + 
+                        "\n\nRaw Data:\n" + 
+                        JSON.stringify(fileData.rawData, null, 2) + 
+                        "\n\n────────────────────\n\n";
+                });
+                dumpElement.textContent = formattedData;
+            }
+        }
+
+        function toggleEvents() {
+            const eventsSection = document.getElementById('eventsSection');
+            eventsSection.classList.toggle('visible');
+        }
+
+        function showError(message) {
+            const errorMessage = document.getElementById('errorMessage');
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+            setTimeout(() => errorMessage.style.display = 'none', 10000);
+        }
     </script>
 </body>
 </html>
