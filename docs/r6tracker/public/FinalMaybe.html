@@ -373,7 +373,6 @@
                             const arrayBuffer = await file.arrayBuffer();
                             const uint8Array = new Uint8Array(arrayBuffer);
                             
-                            // CORRECTED PROMISE.RACE SYNTAX
                             const result = await Promise.race([
                                 window.dissectReplay(uint8Array),
                                 new Promise((_, reject) => 
@@ -411,7 +410,8 @@
                              
                              const userTeamId = matchData.maps[mapKey].userTeamId;
                              const opponentTeamId = matchData.maps[mapKey].opponentTeamId;
-                             const winningTeam = teams.find(t => t.won);
+                             // FIXED LINE: Removed duplicate 'const' declaration
+                             winningTeam = teams.find(t => t.won);
                              if (winningTeam) {
                               if (winningTeam.id === userTeamId || winningTeam.name === userTeamId) {
                                   yourTeamWins++;
