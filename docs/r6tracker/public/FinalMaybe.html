@@ -376,7 +376,7 @@
                             const result = await Promise.race([
                                 window.dissectReplay(uint8Array),
                                 new Promise((_, reject) => 
-                                    setTimeout(() => reject(new Error("Processing timeout (5s)")), 5000)
+                                    setTimeout(() => reject(new Error("Processing timeout (5s)"), 5000)
                                 )
                             ]);
                             
@@ -425,14 +425,15 @@
                                   }
                               }
 
-                          if (winningTeam.role === "Defense") {
-                              if (winningTeam.id === userTeamId || winningTeam.name === userTeamId) {
-                                  yourDefenseWins++;
-                              } else {
-                                  opponentDefenseWins++;
+                              if (winningTeam.role === "Defense") {
+                                  if (winningTeam.id === userTeamId || winningTeam.name === userTeamId) {
+                                      yourDefenseWins++;
+                                  } else {
+                                      opponentDefenseWins++;
+                                  }
                               }
-                          }
-                                 
+                            }
+
                             matchData.maps[mapKey].rounds[roundNumber] = {
                                 site: data.header?.site || "Unknown",
                                 spawn: data.header?.spawnInfo?.name || "Unknown",
@@ -490,9 +491,8 @@
                                     role: newRole
                                 };
                             }
-                        try{
-                            output.textContent += ` ✔️`;
 
+                            output.textContent += ` ✔️`;
                         } catch (error) {
                             console.error(`Error processing ${file.name}:`, error);
                             output.textContent += `\n❌ Error in ${file.name}: ${error.message}`;
